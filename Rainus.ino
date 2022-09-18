@@ -17,6 +17,7 @@ File txtFile;
 
 //// Extra bits
 uint32_t chipId = 0;
+DateTime now;
 
 ////
 void setup() {
@@ -33,7 +34,7 @@ void setup() {
   // Initialize the SD card
   if (!SD.begin(FSPI_SS,*fspi)) {
     Serial.println("Card failed, or not present");
-    // don't do anything more:
+    // BROKEN. WE DONE
     while (1);
   } else {
     Serial.println("Card Detected!");
@@ -44,21 +45,19 @@ void setup() {
 	  chipId |= ((ESP.getEfuseMac() >> (40 - i)) & 0xff) << i;
 	}
 
-  // try to open the file for writing
-  txtFile = SD.open(filename, FILE_WRITE);
-  Serial.print("FILEPATH::");
-  Serial.println(txtFile.path());
-  if (!txtFile) {
-    Serial.print("error opening ");
-    Serial.println(filename);
+  // Check if RTC exists
+  if (!rtc.begin()) {
+    Serial.println("Couldn't find RTC");
+    // BROKEN. WE DONE
     while (1);
   }
 
-  // add some new lines to start
-  txtFile.println();
-  txtFile.println("Hello World!");
-  txtFile.close();
-  Serial.println("Files are supposed to have leading slashes.");
+  // If the RTC is uninitialized, initialize it with the compilation time
+  if (!rtc.isrunning()) {
+    Serial.println("RTC is NOT running!");
+    // following line sets the RTC to the date & time this sketch was compiled
+    rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+  }
 }
 
 int i = 1;
@@ -67,15 +66,24 @@ void loop() {
   //GPIO_NUM_X = rainGaugeGpio;
   //esp_sleep_enable_ext0_wakeup(GPIO_NUM_X, 1);
 
-  DateTime now = rtc.now();
-
-  if(i < 5) {
+  
+  if(i++ < 5){
+    now = rtc.now();
     txtFile = SD.open(filename, FILE_APPEND);
-    Serial.println(i);
-    txtFile.println(i++);
-    txtFile.println(now.year() + '-' + now.month() + '-' + now.day() + "::" + now.hour() + ':' + now.minute() + ':' + now.second));
+    
+    // CSV format:
+    // chipId, timestamp, unixtime, secondstime, (temp), (humidity), (batteryLevel)
+    // Example: ...
+    txtFile.print(chipId);
+    txtFile.print(',');
+    txtFile.print(now.timestamp());
+    txtFile.print(',');
+    txtFile.print(now.unixtime());
+    txtFile.print(',');
+    txtFile.print(now.secondstime());    
+    txtFile.println();
+    
     txtFile.close();
     delay(1000);
   }
 }
-
