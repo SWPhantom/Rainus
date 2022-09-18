@@ -34,7 +34,7 @@ Confusing part was the extra remapping to acm0
 
 
 2022-09-17 00 42
-Much blood was spilt (and cum)
+Much blood was spilt
 
 SD card is read and written to.
 I did REALLY well. I DESERVE a shake. Denny's??
@@ -47,10 +47,9 @@ vspd->fspd in one example, then use the spi init code in an SD example code.
 
 We had issues with pins.
 2, 4, 5, 6 for MISO, MOSI, CLK, SS respectively seemed to work.
-Plugged the board into breadboard, to break out into the SD reader and the logic analyzer was a good move. Analyzer claws are neat, but finicky as helllll.
+Plugged the board into breadboard, to break out into the SD reader and the logic analyzer was a good move. Analyzer claws are neat, but finicky.
 
-We took a walk. It helped (maybe). Contemplated killing animals. We SAW a dying cat in the streets. Met a buxom, tattooed woman of a mature age. 
-
+We took a walk. It helped (maybe).
 
 
 Checkpoint: Can write files to SD card now.
@@ -58,9 +57,6 @@ Next, need to get the other SD card reader working (MAYBE)
 REALLY next, need to work on the RTC integration.
 
 Then, button press to get out of sleep, do the reading and writing, and done.
-
-
-
 
 
 2022-09-17 11 21
