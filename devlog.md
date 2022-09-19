@@ -88,3 +88,12 @@ Had to initialize the RTC and start its running with
 	rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
 
 
+2022-09-19 00 13
+Checkpoint message. Refactored code to be neat.
+We now log the times cleanly, along with the ID of the chip.
+
+2022-09-19 00 44
+Starting to add button functionality.
+
+2022-09-19 01 09
+Finished button functionality.

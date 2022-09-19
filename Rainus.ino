@@ -18,6 +18,8 @@ File txtFile;
 //// Extra bits
 uint32_t chipId = 0;
 DateTime now;
+const int buttonPin = 7; 
+int buttonState = 0; 
 
 ////
 void setup() {
@@ -58,16 +60,24 @@ void setup() {
     // following line sets the RTC to the date & time this sketch was compiled
     rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
   }
+
+  Serial.println("In Sertup. Before checking buttonPin");
+
+  // iIitialize the pushbutton pin as an input:
+  pinMode(buttonPin, INPUT);
 }
 
-int i = 1;
 void loop() {  
   //sp_deep_sleep_start();
   //GPIO_NUM_X = rainGaugeGpio;
   //esp_sleep_enable_ext0_wakeup(GPIO_NUM_X, 1);
 
-  
-  if(i++ < 5){
+  // Read the state of the pushbutton value:
+  Serial.println("In Loop. Before checking buttonPin");
+  buttonState = digitalRead(buttonPin);
+
+  if (buttonState == HIGH) {
+    Serial.println("Button has been pressed. Time to LOG.");
     now = rtc.now();
     txtFile = SD.open(filename, FILE_APPEND);
     
