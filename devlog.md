@@ -97,3 +97,7 @@ Starting to add button functionality.
 
 2022-09-19 01 09
 Finished button functionality.
+Next up, deep sleep!
+
+Temp/Humidity later.
+Ordered other RTCs, also
