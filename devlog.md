@@ -18,6 +18,8 @@ https://www.studiopieters.nl/esp32-c3-pinout/
 I2C/RTC
 https://create.arduino.cc/projecthub/electropeak/interfacing-ds1307-rtc-module-with-arduino-make-a-reminder-08cb61
 
+Deep Sleep
+https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/system/sleep_modes.html
 
 
 
