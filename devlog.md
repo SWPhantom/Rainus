@@ -101,3 +101,10 @@ Next up, deep sleep!
 
 Temp/Humidity later.
 Ordered other RTCs, also
+
+
+
+2022-09-19 14 28
+Starting deep sleep work
+Thinking about too many clicks too fast, of using an exponential backoff, etc
+
