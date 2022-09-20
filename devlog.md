@@ -110,3 +110,64 @@ Ordered other RTCs, also
 Starting deep sleep work
 Thinking about too many clicks too fast, of using an exponential backoff, etc
 
+16 18
+Done with deep sleep
+Added todos. Added debug printing switch.
+Did a few 4 17 button presess
+1x 4 18
+2x 4 21
+1x 4 22
+3x 4 27 (see 6)
+4x 5 37 (see 8, with 2 clicks at 5 36)
+6x 5 58 (see 11)
+reset at 5 58
+3x 5 58 (SEE 4 (could be... 3)
+
+Will come back later to do more
+
+
+TODO:
+* Hook up battery to terminals, see if we get ok 5v power. If so, no need to stress over RTCs
+* String concatenation instead of 12 prints to file.
+* Cases for different part removal in the field (battery, SD card, etc)
+* remap pins for optimal placement of SD card, RTC
+* Ideate on case/fixturing
+** temperature/humidity
+
+
+2022-09-19 18 03
+Tested the program over time. Need to add logic where the logger:
+Wakes up on rain gauge button press, logs data, waits until the button is NOT pressed again, THEN goes to sleep.
+
+Another test, after debounce logic:
+3x 6 16
+5x 6 17
+hold @ 6 33
+12x 6 34
+
+Worked!
+Holding worked well, all data looks a-ok:
+7598744,2022-09-19T18:16:45,1663611405,716926605
+7598744,2022-09-19T18:16:46,1663611406,716926606
+7598744,2022-09-19T18:16:46,1663611406,716926606
+7598744,2022-09-19T18:17:06,1663611426,716926626
+7598744,2022-09-19T18:17:06,1663611426,716926626
+7598744,2022-09-19T18:17:06,1663611426,716926626
+7598744,2022-09-19T18:17:06,1663611426,716926626
+7598744,2022-09-19T18:17:07,1663611427,716926627
+7598744,2022-09-19T18:33:48,1663612428,716927628
+7598744,2022-09-19T18:34:19,1663612459,716927659
+7598744,2022-09-19T18:34:20,1663612460,716927660
+7598744,2022-09-19T18:34:20,1663612460,716927660
+7598744,2022-09-19T18:34:20,1663612460,716927660
+7598744,2022-09-19T18:34:21,1663612461,716927661
+7598744,2022-09-19T18:34:21,1663612461,716927661
+7598744,2022-09-19T18:34:21,1663612461,716927661
+7598744,2022-09-19T18:34:22,1663612462,716927662
+7598744,2022-09-19T18:34:22,1663612462,716927662
+7598744,2022-09-19T18:34:22,1663612462,716927662
+7598744,2022-09-19T18:34:23,1663612463,716927663
+7598744,2022-09-19T18:34:23,1663612463,716927663
+
+
+18 39

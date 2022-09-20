@@ -18,30 +18,51 @@ File txtFile;
 //// Extra bits
 uint32_t chipId = 0;
 DateTime now;
-int buttonState = 0; 
 RTC_DATA_ATTR int bootCount = 0;
-#define BUTTON_PIN_BITMASK 0x000000004 // 2^33 in hex
 
-// debug 
-long int t1;
-long int t2;
-////
+
+//// Rain Gauge
+const int buttonPin = 2;
+int buttonState = 0; 
+#define BUTTON_PIN_BITMASK 0x000000004 // 2^33 in hex. defines GPIO pin 2
+
+//// debug 
+// long int t1;
+// long int t2;
+
+#define DEBUG true
+void pr(char * input) {
+  if(DEBUG){
+    Serial.println(input);
+  }
+}
+
+void pr(StringSumHelper input) {
+  if(DEBUG){
+    Serial.println(input);
+  }
+}
+
 void setup() {
-  t1 = millis();
+  // t1 = millis();
   // Initialize Serial (only for debug?)
   Serial.begin(9600);
   while (!Serial);
-  Serial.println();
-  Serial.println("Start!");
+  pr("");
+  pr("Start!");
 
   // Deep sleep wakeup source initialization.
   // This board allows the mask to define pins 0-5, but no others.
   // BUTTON_PIN_BITMASK 0x000000004 // defines GPIO pin 2
   esp_deep_sleep_enable_gpio_wakeup(BUTTON_PIN_BITMASK, ESP_GPIO_WAKEUP_GPIO_HIGH);
 
+  // initialize the pushbutton pin as an input:
+  pinMode(buttonPin, INPUT);
+  buttonState = 0;
+
   //Increment boot number and print it every reboot
   ++bootCount;
-  Serial.println("Boot number: " + String(bootCount));
+  pr("Boot number: " + String(bootCount));
 
   // SPI setup
   SPIClass * fspi = new SPIClass(FSPI);
@@ -50,11 +71,11 @@ void setup() {
 
   // Initialize the SD card
   if (!SD.begin(FSPI_SS,*fspi)) {
-    Serial.println("Card failed, or not present");
+    pr("Card failed, or not present");
     // If card isn't found, deep sleep.
     esp_deep_sleep_start();
   } else {
-    Serial.println("Card Detected!");
+    pr("Card Detected!");
   }
 
   // Calculate chipId
@@ -64,10 +85,9 @@ void setup() {
 
   // Check if RTC exists
   if (!rtc.begin()) {
-    Serial.println("Couldn't find RTC");
+    pr("Couldn't find RTC");
     // BROKEN. WE DONE
     esp_deep_sleep_start();
-
   }
 
   // TODO: If RTC has fault, we may want to write to the log to tell researcher that
@@ -76,7 +96,7 @@ void setup() {
 
   // If the RTC is uninitialized, initialize it with the compilation time
   if (!rtc.isrunning()) {
-    Serial.println("RTC is NOT running!");
+    pr("RTC is NOT running!");
     // following line sets the RTC to the date & time this sketch was compiled
     rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
   }
@@ -88,14 +108,15 @@ void loop() {
 
   // If the board woke up from deep sleep via rain gauge/button, we're golden! Time to log!
   if(wakeup_reason == 7) {
-    Serial.println("Button has been pressed. Time to LOG.");
+    pr("Button has been pressed. Time to LOG.");
 
     now = rtc.now();
     txtFile = SD.open(filename, FILE_APPEND);
     
     // CSV format:
     // chipId, timestamp, unixtime, secondstime, (temp), (humidity), (batteryLevel)
-    // Example: ...
+    // Example: 7598744,2022-09-19T16:11:03,1663603863,716919063
+    // TODO: Build string ahead of time. 
     txtFile.print(chipId);
     txtFile.print(',');
     txtFile.print(now.timestamp());
@@ -104,15 +125,25 @@ void loop() {
     txtFile.print(',');
     txtFile.print(now.secondstime());    
     txtFile.println();
-    
+  
     txtFile.close();
+
+    // Section to wait until the button is unpressed, to not have bounced signal/logs that happen very quickly.
+    do {
+      buttonState = digitalRead(buttonPin);
+    } while (buttonState == HIGH);
+
   } else {
-    Serial.println("Here from reset/startup. Do nothing.");
+    pr("Here from reset/startup. Do nothing.");
   }
-  t2 = millis();
+  
+  // t2 = millis();
+  
+  /* Timing Debug
   Serial.print("Time Elapsed for Operation(ms): ");
   Serial.println(t2-t1);
   Serial.println();
+  */
   esp_deep_sleep_start();
-  Serial.println("SENITEE CHEK SHOULD NOT PRINT.");
+  pr("SENITEE CHEK SHOULD NOT PRINT.");
 }
