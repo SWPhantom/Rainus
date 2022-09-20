@@ -171,3 +171,22 @@ Holding worked well, all data looks a-ok:
 
 
 18 39
+String concat?
+
+2022-09-20 0101
+No string concat.
+
+GK and I built different versions of the assembly. We reassigned pins to connect the SD card reader directly. 
+Looks very good and shoddy at the same time.
+
+We have a cluster of wires soldered to a header pin. Not pretty. Could use the battery negative terminal or something.
+
+TODO:
+We may need to disable the wifi and bluetooth.
+
+
+01 10
+Let's measure voltage of battery. 
+
+01 14:
+4.13-4.14v

@@ -6,25 +6,24 @@
 RTC_DS1307 rtc;
 
 //// SPI/SD Card section
-#define FSPI_MISO   7
-#define FSPI_MOSI   4
-#define FSPI_SCLK   5
-#define FSPI_SS     6
+#define FSPI_MISO   5
+#define FSPI_MOSI   7
+#define FSPI_SCLK   6
+#define FSPI_SS     10
 
 // Rainus log file (Don't forget the leading slash! eg "/rainLog.txt")
 const char filename[] = "/rainLog.txt";
 File txtFile;
 
-//// Extra bits
-uint32_t chipId = 0;
-DateTime now;
-RTC_DATA_ATTR int bootCount = 0;
-
-
 //// Rain Gauge
 const int buttonPin = 2;
 int buttonState = 0; 
 #define BUTTON_PIN_BITMASK 0x000000004 // 2^33 in hex. defines GPIO pin 2
+
+//// Extra bits
+uint32_t chipId = 0;
+DateTime now;
+RTC_DATA_ATTR int bootCount = 0;
 
 //// debug 
 // long int t1;
@@ -55,6 +54,14 @@ void setup() {
   // This board allows the mask to define pins 0-5, but no others.
   // BUTTON_PIN_BITMASK 0x000000004 // defines GPIO pin 2
   esp_deep_sleep_enable_gpio_wakeup(BUTTON_PIN_BITMASK, ESP_GPIO_WAKEUP_GPIO_HIGH);
+
+  // TODO: We may need to disable bluetooth and wifi for TRUE deep sleep.
+  /* the following don't work yet, but are mentioned in
+  https://docs.espressif.com/projects/esp-idf/en/latest/esp32c3/api-reference/system/sleep_modes.html#_CPPv433esp_deepsleep_gpio_wake_up_mode_t
+  esp_bluedroid_disable();
+  esp_bt_controller_disable();
+  esp_wifi_stop());
+  */
 
   // initialize the pushbutton pin as an input:
   pinMode(buttonPin, INPUT);
@@ -97,6 +104,8 @@ void setup() {
   // If the RTC is uninitialized, initialize it with the compilation time
   if (!rtc.isrunning()) {
     pr("RTC is NOT running!");
+    pr("Initializing the RTC...");
+
     // following line sets the RTC to the date & time this sketch was compiled
     rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
   }
@@ -137,13 +146,13 @@ void loop() {
     pr("Here from reset/startup. Do nothing.");
   }
   
-  // t2 = millis();
-  
   /* Timing Debug
+  t2 = millis();
   Serial.print("Time Elapsed for Operation(ms): ");
   Serial.println(t2-t1);
   Serial.println();
   */
+
   esp_deep_sleep_start();
   pr("SENITEE CHEK SHOULD NOT PRINT.");
 }
