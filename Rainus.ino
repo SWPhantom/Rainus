@@ -2,9 +2,6 @@
 #include <Wire.h>
 #include "RTClib.h"
 
-//// RTC Section
-RTC_DS1307 rtc;
-
 //// SPI/SD Card section
 #define FSPI_MISO   5
 #define FSPI_MOSI   7
@@ -22,13 +19,23 @@ int buttonState = 0;
 
 //// Extra bits
 uint32_t chipId = 0;
+
+//// RTC/Time/etc
+// NOTE: ONE XOR THE OTHER MUST BE true
+#define PCF8523 true
+#define DS1307 false
+
+#if PCF8523 == true
+  RTC_PCF8523 rtc; // Adafruit 3.3v RTC (https://learn.adafruit.com/adafruit-pcf8523-real-time-clock/rtc-with-arduino)
+#endif
+#if DS1307 == true
+  RTC_DS1307 rtc; // RTC that uses 5v (but works with 3.3v...)
+#endif
+DateTime compileTime;
 DateTime now;
 RTC_DATA_ATTR int bootCount = 0;
 
-//// debug 
-// long int t1;
-// long int t2;
-
+//// Debug/Helpers
 #define DEBUG true
 void pr(char * input) {
   if(DEBUG){
@@ -36,15 +43,25 @@ void pr(char * input) {
   }
 }
 
+// To measure time!
+#define TIMERS false
+#if TIMERS == true && DEBUG == true
+  long int t1;
+  long int t2;
+#endif
+
+// Print quick function. If DEBUG is on, pr() will print to serial out.
 void pr(StringSumHelper input) {
-  if(DEBUG){
+  #if DEBUG == true
     Serial.println(input);
-  }
+  #endif
 }
 
 void setup() {
-  // t1 = millis();
-  // Initialize Serial (only for debug?)
+  #if TIMERS == true && DEBUG == true
+    t1 = millis();
+  #endif
+
   Serial.begin(9600);
   while (!Serial);
   pr("");
@@ -54,14 +71,6 @@ void setup() {
   // This board allows the mask to define pins 0-5, but no others.
   // BUTTON_PIN_BITMASK 0x000000004 // defines GPIO pin 2
   esp_deep_sleep_enable_gpio_wakeup(BUTTON_PIN_BITMASK, ESP_GPIO_WAKEUP_GPIO_HIGH);
-
-  // TODO: We may need to disable bluetooth and wifi for TRUE deep sleep.
-  /* the following don't work yet, but are mentioned in
-  https://docs.espressif.com/projects/esp-idf/en/latest/esp32c3/api-reference/system/sleep_modes.html#_CPPv433esp_deepsleep_gpio_wake_up_mode_t
-  esp_bluedroid_disable();
-  esp_bt_controller_disable();
-  esp_wifi_stop());
-  */
 
   // initialize the pushbutton pin as an input:
   pinMode(buttonPin, INPUT);
@@ -91,6 +100,7 @@ void setup() {
 	}
 
   // Check if RTC exists
+  // Universal across both RTCs
   if (!rtc.begin()) {
     pr("Couldn't find RTC");
     // BROKEN. WE DONE
@@ -102,13 +112,33 @@ void setup() {
   // but invalid, time)
 
   // If the RTC is uninitialized, initialize it with the compilation time
-  if (!rtc.isrunning()) {
-    pr("RTC is NOT running!");
-    pr("Initializing the RTC...");
+  compileTime = DateTime(F(__DATE__), F(__TIME__));
 
-    // following line sets the RTC to the date & time this sketch was compiled
-    rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
-  }
+  // Logic for 8523 RTC
+  #if PCF8523 == true
+    if (!rtc.initialized() || rtc.lostPower()) {
+      pr("PCF8523 RTC is NOT initialized, let's set the time!");
+      pr("Initializing the RTC...");
+      // following line sets the RTC to the date & time this sketch was compiled
+      rtc.adjust(compileTime);
+
+      rtc.start();
+    }
+  #endif
+
+  // Logic for 1307 RTC
+  #if DS1307 == true
+    if (!rtc.isrunning() ) {
+      pr("DS1307 RTC is NOT initialized, let's set the time!");
+      pr("Initializing the RTC...");
+
+      // following line sets the RTC to the date & time this sketch was compiled
+      rtc.adjust(compileTime);
+    }
+  #endif
+    
+  pr("RTC is running. Datetime:");
+  pr(rtc.now().timestamp());
 }
 
 void loop() {
@@ -146,12 +176,11 @@ void loop() {
     pr("Here from reset/startup. Do nothing.");
   }
   
-  /* Timing Debug
-  t2 = millis();
-  Serial.print("Time Elapsed for Operation(ms): ");
-  Serial.println(t2-t1);
-  Serial.println();
-  */
+  #if TIMERS == true && DEBUG == true
+    t2 = millis();
+    pr("Time Elapsed for Operation(ms): ");
+    pr(t2-t1);
+  #endif
 
   esp_deep_sleep_start();
   pr("SENITEE CHEK SHOULD NOT PRINT.");

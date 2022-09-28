@@ -189,4 +189,20 @@ We may need to disable the wifi and bluetooth.
 Let's measure voltage of battery. 
 
 01 14:
-4.13-4.14v
+Voltage: 4.13-4.14v
+
+2022-09-20 10 51:
+Voltage: 4.12-4.13v
+
+Did 10 readings.
+
+2022-09-20 17 01:
+Did a score of more readings
+Voltage: 4.11-4.12v
+
+
+
+
+2022-09-27
+Tested and added code to make the Arduino RTC work
+  RTC_PCF8523 (https://learn.adafruit.com/adafruit-pcf8523-real-time-clock/rtc-with-arduino)
