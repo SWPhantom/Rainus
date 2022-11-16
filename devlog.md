@@ -206,3 +206,13 @@ Voltage: 4.11-4.12v
 2022-09-27
 Tested and added code to make the Arduino RTC work
   RTC_PCF8523 (https://learn.adafruit.com/adafruit-pcf8523-real-time-clock/rtc-with-arduino)
+  
+  
+  
+2022-11-16 14:40:00
+Just discovered that the local test Rainus is no longer glowing with the on LED.
+As I assumed when I put in a non-spec 3v Energizer Lithium 12-2032, when voltage dipped below some threshold, the board shut down.
+This must have hapened between November 9th (the last time I pulled data from the card, when the light was still on), and today.
+Since I put the device outdoors on approximately October 19th (judging by the first data in [the spreadsheet](https://docs.google.com/spreadsheets/d/1Qej0Jb0RguejD68-Whe8UmjqHHGkIUU_zKdhaDspYHQ/), this shows that with a 3v non-spec battery, the device will work at LEAST 21 days straight, up to 28 days, assuming the battery went below the threshold today...
+
+Let it be known that I put an [in-spec 16340 battery](https://www.amazon.com/16340-Battery-Batteries-2800-Pack/dp/B0BK4KY88J/) into the Rainus device at my house. at the above timestamp
