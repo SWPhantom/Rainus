@@ -147,6 +147,7 @@ hold @ 6 33
 
 Worked!
 Holding worked well, all data looks a-ok:
+```
 7598744,2022-09-19T18:16:45,1663611405,716926605
 7598744,2022-09-19T18:16:46,1663611406,716926606
 7598744,2022-09-19T18:16:46,1663611406,716926606
@@ -168,7 +169,7 @@ Holding worked well, all data looks a-ok:
 7598744,2022-09-19T18:34:22,1663612462,716927662
 7598744,2022-09-19T18:34:23,1663612463,716927663
 7598744,2022-09-19T18:34:23,1663612463,716927663
-
+```
 
 18 39
 String concat?
@@ -239,26 +240,26 @@ This doesn't seem to make sense. As far as I thought, if the main battery is plu
 
 This indicates that my test device needs to go in and a documented, rigorous test should be done:
 
-# Take out RTC Coin Cell Battery (rtcbat) and 16340 Main Battery (mainbat) 
-	# This should set the RTC to unpowered/not started.
-# Turn off the board and put in charged rtcbat and mainbat
-# Connect board to a computer with the latest rainus.ino in Arduino and flash it.
-# Press the rain button a few times over a few minutes.
-	# Readings should increment in time as expected.
-# Remove mainbat. Wait a few minutes.
-# Put in mainbat.
-# Press the rain button a few times over a few minutes.
-	# Readings should STILL increment in time as expected. Time should NOT have reset.
-# Remove rtcbat. Wait a few minutes.
-# Press the rain button a few times over a few minutes.
-	# [ ] Verify what happens here. I expect that the time would have reset on every button press???
-# Put in rtcbat. Wait a few minutes.
-# Press the rain button a few times over a few minutes.
-	# [ ] Readings should have reset again, BUT will now increase in time as expected.
-# Remove rtcbat and mainbat. 
-# Put in rtcbat and mainbat.
-# Press the rain button a few times over a few minutes.
-	# [ ] Readings should have reset again, and will increase in time as expected.
+1. Take out RTC Coin Cell Battery (rtcbat) and 16340 Main Battery (mainbat) 
+	- This should set the RTC to unpowered/not started.
+2. Turn off the board and put in charged rtcbat and mainbat
+3. Connect board to a computer with the latest rainus.ino in Arduino and flash it.
+4. Press the rain button a few times over a few minutes.
+	- Readings should increment in time as expected.
+5. Remove mainbat. Wait a few minutes.
+6. Put in mainbat.
+7. Press the rain button a few times over a few minutes.
+	- Readings should STILL increment in time as expected. Time should NOT have reset.
+8. Remove rtcbat. Wait a few minutes.
+9. Press the rain button a few times over a few minutes.
+	- [ ] Verify what happens here. I expect that the time would have reset on every button press???
+10. Put in rtcbat. Wait a few minutes.
+11. Press the rain button a few times over a few minutes.
+	- [ ] Readings should have reset again, BUT will now increase in time as expected.
+12. Remove rtcbat and mainbat. 
+13. Put in rtcbat and mainbat.
+14. Press the rain button a few times over a few minutes.
+	- [ ] Readings should have reset again, and will increase in time as expected.
 
 Further, I'll need to comment out the battery time reset logic. If the RTC's `rtc.lostPower()` is true, it may still carry a memory of the last time???
 I'm pretty sure if `rtc.initialized()` is true, the time has been wiped, though.
