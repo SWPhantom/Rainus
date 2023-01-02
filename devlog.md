@@ -216,3 +216,60 @@ This must have hapened between November 9th (the last time I pulled data from th
 Since I put the device outdoors on approximately October 19th (judging by the first data in [the spreadsheet](https://docs.google.com/spreadsheets/d/1Qej0Jb0RguejD68-Whe8UmjqHHGkIUU_zKdhaDspYHQ/), this shows that with a 3v non-spec battery, the device will work at LEAST 21 days straight, up to 28 days, assuming the battery went below the threshold today...
 
 Let it be known that I put an [in-spec 16340 battery](https://www.amazon.com/16340-Battery-Batteries-2800-Pack/dp/B0BK4KY88J/) into the Rainus device at my house. at the above timestamp
+
+
+2023-01-01
+Some retroactive notes:
+The in-spec battery did NOT hold up. Not sure if it was because I didn't charge it or if it was a trash battery at the time.
+In fact, I went through two of these batteries and each lasted 1 week or less. I didn't check often, so not sure when the power cut out...
+
+Before going to Thailand to check in on the other Rainus devices and meet with GK on 2022-12-08, I put in the other alkaline Duracell battery (3v rated). THAT one lasted a longer time than the other 16340 batteries. That said, by 2023-01-01, I noticed the battery was dead. 
+
+Another BIG note:
+Looking at the previous commit, you'll see that the latest batch of Rainus updates resets time!
+This indicates that the line
+`if (!rtc.initialized() || rtc.lostPower()) {`
+was true and the RTC's time was adjusted to the compile time... which suggests that the RTC battery went below operational theshold...
+This doesn't really make sense, and needs to be tested... like immediately. 
+GK and I saw similar results in Thailand, though we assumed that the battery drained due moisture shorting.
+
+2023-01-01 17:20:00
+Now that I look over the data again, I see that not only did the RTC reset twice in the new dataset, but ALSO that it seems to have reset after I was already gone!
+This doesn't seem to make sense. As far as I thought, if the main battery is plugged in, the RTC doesn't reset and ONLY resets if both batteries are out at the same time.
+
+This indicates that my test device needs to go in and a documented, rigorous test should be done:
+
+# Take out RTC Coin Cell Battery (rtcbat) and 16340 Main Battery (mainbat) 
+	# This should set the RTC to unpowered/not started.
+# Turn off the board and put in charged rtcbat and mainbat
+# Connect board to a computer with the latest rainus.ino in Arduino and flash it.
+# Press the rain button a few times over a few minutes.
+	# Readings should increment in time as expected.
+# Remove mainbat. Wait a few minutes.
+# Put in mainbat.
+# Press the rain button a few times over a few minutes.
+	# Readings should STILL increment in time as expected. Time should NOT have reset.
+# Remove rtcbat. Wait a few minutes.
+# Press the rain button a few times over a few minutes.
+	# [ ] Verify what happens here. I expect that the time would have reset on every button press???
+# Put in rtcbat. Wait a few minutes.
+# Press the rain button a few times over a few minutes.
+	# [ ] Readings should have reset again, BUT will now increase in time as expected.
+# Remove rtcbat and mainbat. 
+# Put in rtcbat and mainbat.
+# Press the rain button a few times over a few minutes.
+	# [ ] Readings should have reset again, and will increase in time as expected.
+
+Further, I'll need to comment out the battery time reset logic. If the RTC's `rtc.lostPower()` is true, it may still carry a memory of the last time???
+I'm pretty sure if `rtc.initialized()` is true, the time has been wiped, though.
+
+I should read the specs!
+
+Either way, if the RTC had an issue in time, we should write that to the SD card. 
+eg, if lostPower() is true,
+```
+1642488,2022-10-19T17:29:31,1666200571,719515771
+1642488,2022-10-19T17:29:45,1666200585,719515785
+LOST POWER. CURRENT TIME: 2022-10-19T17:29:51
+```
+and keep logging normally. Will need to check if `rtc.start();` needs to be called after that, though.
