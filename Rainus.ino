@@ -54,13 +54,21 @@ void pr(StringSumHelper input) {
 }
 
 // To measure time!
-#define TIMERS false
+#define TIMERS true
 #if TIMERS == true && DEBUG == true
   long int t1;
   long int t2;
 #endif
 
-
+String composeLog(uint32_t chipId, String logTimestamp, int bootCount, String compileTimestamp) {
+  String pre1 = "{\"user\":\"";
+  String pre2 = "\",\"collection\":\"";
+  String pre3 = "\",\"datetime\":\"";
+  String pre4 = "\",\"data\":\"BootNumber:";
+  String pre5 = ", CompileTime: ";
+  String pre6 = "\"}";
+  return pre1 + "rainus" + pre2 + String(chipId) + pre3 + logTimestamp + pre4 + String(bootCount) + pre5 + compileTimestamp +pre6;
+}
 
 void setup() {
   #if TIMERS == true && DEBUG == true
@@ -80,67 +88,6 @@ void setup() {
   // initialize the pushbutton pin as an input:
   pinMode(buttonPin, INPUT);
   buttonState = 0;
-
-  // Wifi!
-  WiFi.mode(WIFI_STA);
-  // WiFi.scanNetworks will return the number of networks found
-  /*
-  int n = WiFi.scanNetworks();
-  Serial.println("scan done");
-  if (n == 0) {
-      Serial.println("no networks found");
-  } else {
-    Serial.print(n);
-    Serial.println(" networks found");
-    for (int i = 0; i < n; ++i) {
-      // Print SSID and RSSI for each network found
-      Serial.print(i + 1);
-      Serial.print(": ");
-      Serial.print(WiFi.SSID(i));
-      Serial.print(" (");
-      Serial.print(WiFi.RSSI(i));
-      Serial.print(")");
-      Serial.println((WiFi.encryptionType(i) == WIFI_AUTH_OPEN)?" ":"*");
-      delay(10);
-    }
-  }
-  */
-  WiFi.disconnect();
-  WiFi.begin("CIA Watchdog", "Baconjob!");
-  pr("Connecting to 'CIA Watchdog' ..");
-  int retries = 0;
-  while (WiFi.status() != WL_CONNECTED) {
-    pr('.');
-    delay(100);
-    retries++;
-  }
-  pr("Connected after this many 100ms retries:", retries);
-  pr(WiFi.localIP());
-
-
-  // Sending HTTP requests
-  HTTPClient http;
-
-  String serverPath = "http://satanize.me:2700/log";
-  Serial.print("About to send to ");
-  Serial.println(serverPath);
-  http.begin(serverPath.c_str());
-  http.addHeader("Content-Type", "application/json");
-  char payload[256];
-  sprintf(payload, "{\"user\":\"%s\",\"collection\":\"%s\",\"time\":\"%s\",\"data\":\"%s\"}", "rainus", "7598744", "2022-09-19T16:11:03", "randomData");
-  int httpResponseCode = http.POST(request);
-  if (httpResponseCode > 0) {
-    pr("HTTP Response code: ");
-    pr(httpResponseCode);
-    String payload = http.getString();
-    pr(payload);
-  }
-  else {
-    pr("Error code: ");
-    pr(httpResponseCode);
-  }
-  // Free resources
-  http.end();
 
   //Increment boot number and print it every reboot
   ++bootCount;
@@ -233,6 +180,49 @@ void loop() {
   
     txtFile.close();
 
+    // Wifi!
+    WiFi.mode(WIFI_STA);
+    WiFi.disconnect();
+    WiFi.begin("CIA Watchdog", "Baconjob!");
+    pr("Connecting to 'CIA Watchdog' ..");
+    int retries = 0;
+    while (WiFi.status() != WL_CONNECTED) {
+      pr('.');
+      delay(100);
+      retries++;
+    }
+    pr("Connected after this many 100ms retries:");
+    pr(retries);
+    pr(WiFi.localIP().toString());
+
+    // Sending HTTP requests
+    HTTPClient http;
+
+    String serverPath = "http://satanize.me:2700/log";
+    pr("About to send to");
+    pr(serverPath);
+    http.begin(serverPath.c_str());
+    http.addHeader("Content-Type", "application/json");
+
+    String payload = composeLog(chipId, now.timestamp(), bootCount, compileTime.timestamp());
+    
+    pr("POSTing payload...");
+    int httpResponseCode = http.POST(payload);
+
+    if (httpResponseCode > 0) {
+      pr("HTTP Response code: ");
+      pr(httpResponseCode);
+      String payload = http.getString();
+      pr(payload);
+    }
+    else {
+      pr("Error code: ");
+      pr(httpResponseCode);
+    }
+    // Free resources
+    http.end();
+    WiFi.disconnect();
+
     // Section to wait until the button is unpressed, to not have bounced signal/logs that happen very quickly.
     do {
       buttonState = digitalRead(buttonPin);
@@ -248,6 +238,7 @@ void loop() {
     pr(t2-t1);
   #endif
 
+  pr("sleep time!");
   esp_deep_sleep_start();
   pr("SENITEE CHEK SHOULD NOT PRINT.");
 }
