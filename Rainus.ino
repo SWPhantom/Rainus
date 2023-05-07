@@ -4,7 +4,6 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
 
-
 //// SPI/SD Card section
 #define FSPI_MISO   5
 #define FSPI_MOSI   7
@@ -27,6 +26,8 @@ uint32_t chipId = 0;
 // NOTE: ONE XOR THE OTHER MUST BE true
 #define PCF8523 true
 #define DS1307 false
+
+#define RTC_FORCE_RESET true
 
 #if PCF8523 == true
   RTC_PCF8523 rtc; // Adafruit 3.3v RTC (https://learn.adafruit.com/adafruit-pcf8523-real-time-clock/rtc-with-arduino)
@@ -54,7 +55,7 @@ void pr(StringSumHelper input) {
 }
 
 // To measure time!
-#define TIMERS true
+#define TIMERS false
 #if TIMERS == true && DEBUG == true
   long int t1;
   long int t2;
@@ -65,9 +66,9 @@ String composeLog(uint32_t chipId, String logTimestamp, int bootCount, String co
   String pre2 = "\",\"collection\":\"";
   String pre3 = "\",\"datetime\":\"";
   String pre4 = "\",\"data\":\"BootNumber:";
-  String pre5 = ", CompileTime: ";
+  String pre5 = ", logTimestamp: ";
   String pre6 = "\"}";
-  return pre1 + "rainus" + pre2 + String(chipId) + pre3 + logTimestamp + pre4 + String(bootCount) + pre5 + compileTimestamp +pre6;
+  return pre1 + "rainus_profiler" + pre2 + String(chipId) + pre4 + String(bootCount) + pre5 + logTimestamp +pre6;
 }
 
 void setup() {
@@ -149,6 +150,20 @@ void setup() {
       rtc.adjust(compileTime);
     }
   #endif
+
+  now = rtc.now();
+  if (compileTime > now) {
+    pr("RTC time behind CompileTime. Resetting");
+    #if PCF8523 == true
+      pr("RTC PCF8523");
+      rtc.adjust(compileTime);
+      rtc.start();
+    #endif
+    #if DS1307 == true
+      pr("RTC DS1307");
+      rtc.adjust(compileTime);
+    #endif
+  }
     
   pr("RTC is running. Datetime:");
   pr(rtc.now().timestamp());
@@ -184,10 +199,9 @@ void loop() {
     WiFi.mode(WIFI_STA);
     WiFi.disconnect();
     WiFi.begin("CIA Watchdog", "Baconjob!");
-    pr("Connecting to 'CIA Watchdog' ..");
+    pr("Connecting to 'CIA Watchdog' ...");
     int retries = 0;
     while (WiFi.status() != WL_CONNECTED) {
-      pr('.');
       delay(100);
       retries++;
     }
@@ -206,7 +220,8 @@ void loop() {
 
     String payload = composeLog(chipId, now.timestamp(), bootCount, compileTime.timestamp());
     
-    pr("POSTing payload...");
+    pr("POSTing payload:");
+    pr(payload);
     int httpResponseCode = http.POST(payload);
 
     if (httpResponseCode > 0) {

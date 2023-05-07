@@ -283,3 +283,16 @@ Created the loggo project/service that can get arbitrary logs. Making the Rainus
 
 Will be making new versions of the Rainus devices. Alternate chips (non-pi RTC, etc), alternate batteries, added dc-dc converter???
 
+
+
+2023-05-06
+Soldered all the liligo boards to pins.
+Noticed that they are all version 1.3!
+
+Replaced the pi header PCF8523 with the HiLetgo one:
+https://www.amazon.com/gp/product/B082LTHR28
+
+Learning to use the Power Profiler Kit II:
+https://www.nordicsemi.com/Products/Development-hardware/Power-Profiler-Kit-2
+
+
