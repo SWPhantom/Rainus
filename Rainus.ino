@@ -3,6 +3,9 @@
 #include "RTClib.h"
 #include <WiFi.h>
 #include <HTTPClient.h>
+#include "Arduino.h"
+#include "esp_adc_cal.h"
+
 
 //// SPI/SD Card section
 #define FSPI_MISO   5
@@ -26,8 +29,7 @@ uint32_t chipId = 0;
 // NOTE: ONE XOR THE OTHER MUST BE true
 #define PCF8523 true
 #define DS1307 false
-
-#define RTC_FORCE_RESET true
+#define RTC_CHECK_COMPILE_TIME true
 
 #if PCF8523 == true
   RTC_PCF8523 rtc; // Adafruit 3.3v RTC (https://learn.adafruit.com/adafruit-pcf8523-real-time-clock/rtc-with-arduino)
@@ -40,11 +42,12 @@ DateTime now;
 RTC_DATA_ATTR int bootCount = 0;
 
 //// Debug/Helpers
+#define WEB false
 #define DEBUG true
 void pr(char * input) {
-  if(DEBUG){
+  #if DEBUG == true
     Serial.println(input);
-  }
+  #endif
 }
 
 // Print quick function. If DEBUG is on, pr() will print to serial out.
@@ -61,15 +64,85 @@ void pr(StringSumHelper input) {
   long int t2;
 #endif
 
-String composeLog(uint32_t chipId, String logTimestamp, int bootCount, String compileTimestamp) {
-  String pre1 = "{\"user\":\"";
-  String pre2 = "\",\"collection\":\"";
-  String pre3 = "\",\"datetime\":\"";
-  String pre4 = "\",\"data\":\"BootNumber:";
-  String pre5 = ", logTimestamp: ";
-  String pre6 = "\"}";
-  return pre1 + "rainus_profiler" + pre2 + String(chipId) + pre4 + String(bootCount) + pre5 + logTimestamp +pre6;
+void writeLog() {
+  now = rtc.now();
+  txtFile = SD.open(filename, FILE_APPEND);
+  
+  // CSV format:
+  // chipId, timestamp, unixtime, secondstime, (temp), (humidity), (batteryLevel)
+  // Example: 7598744,2022-09-19T16:11:03,1663603863,716919063
+  // TODO: Build string ahead of time. 
+  txtFile.print(chipId);
+  txtFile.print(',');
+  txtFile.print(now.timestamp());
+  txtFile.print(',');
+  txtFile.print(now.unixtime());
+  txtFile.print(',');
+  txtFile.print(now.secondstime());
+  txtFile.println();
+  txtFile.close();
 }
+
+#if WEB == true
+  String composeLog(uint32_t chipId, String logTimestamp, int bootCount, String compileTimestamp) {
+    String pre1 = "{\"user\":\"";
+    String pre2 = "\",\"collection\":\"";
+    String pre3 = "\",\"datetime\":\"";
+    String pre4 = "\",\"data\":\"BootNumber:";
+    String pre5 = ", logTimestamp: ";
+    String pre6 = "\"}";
+    return pre1 + "rainus_profiler" + pre2 + String(chipId) + pre4 + String(bootCount) + pre5 + logTimestamp +pre6;
+  }
+
+  String ssid = "";
+  String password = "";
+  String serverPath = "";
+  HTTPClient http;
+  String payload;
+  int httpResponseCode;
+
+  void sendLog() {
+    WiFi.mode(WIFI_STA);
+    WiFi.disconnect();
+    WiFi.begin(ssid, password);
+    int retries = 0;
+    while (WiFi.status() != WL_CONNECTED) {
+      delay(100);
+      retries++;
+    }
+    pr("Connected after this many 100ms retries:");
+    pr(retries);
+    pr(WiFi.localIP().toString());
+
+    // Send log to server
+    pr("About to send to");
+    pr(serverPath);
+    http.begin(serverPath.c_str());
+    http.addHeader("Content-Type", "application/json");
+
+    payload = composeLog(chipId, now.timestamp(), bootCount, compileTime.timestamp());
+    
+    pr("POSTing payload:");
+    pr(payload);
+    httpResponseCode = http.POST(payload);
+
+    if (httpResponseCode > 0) {
+      pr("HTTP Response code: ");
+      pr(httpResponseCode);
+      String payload = http.getString();
+      pr(payload);
+    }
+    else {
+      pr("Error code: ");
+      pr(httpResponseCode);
+    }
+    // Free resources
+    http.end();
+    WiFi.disconnect();
+  }
+#endif
+
+esp_err_t err;
 
 void setup() {
   #if TIMERS == true && DEBUG == true
@@ -84,15 +157,51 @@ void setup() {
   // Deep sleep wakeup source initialization.
   // This board allows the mask to define pins 0-5, but no others.
   // BUTTON_PIN_BITMASK 0x000000004 // defines GPIO pin 2
-  esp_deep_sleep_enable_gpio_wakeup(BUTTON_PIN_BITMASK, ESP_GPIO_WAKEUP_GPIO_HIGH);
+  err = esp_deep_sleep_enable_gpio_wakeup(BUTTON_PIN_BITMASK, ESP_GPIO_WAKEUP_GPIO_HIGH);
+  if (err != ESP_OK) {
+    pr("esp_deep_sleep_enable_gpio_wakeup resulted in error:" + (int)err);
+  }
+  /*
+  // Configure deep sleep powerdown options
+  err = esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_OFF);
+  if (err != ESP_OK) {
+    pr("esp_sleep_pd_config for ESP_PD_DOMAIN_RTC_PERIPH resulted in error:" + (int)err);
+  }
+  err = esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_SLOW_MEM, ESP_PD_OPTION_OFF);
+  if (err != ESP_OK) {
+    pr("esp_sleep_pd_config for ESP_PD_DOMAIN_RTC_SLOW_MEM resulted in error:" + (int)err);
+  }
+  err = esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_FAST_MEM, ESP_PD_OPTION_OFF);
+  if (err != ESP_OK) {
+    pr("esp_sleep_pd_config for ESP_PD_DOMAIN_RTC_FAST_MEM resulted in error:" + (int)err);
+  }
+  err = esp_sleep_pd_config(ESP_PD_DOMAIN_XTAL, ESP_PD_OPTION_OFF);
+  if (err != ESP_OK) {
+    pr("esp_sleep_pd_config for ESP_PD_DOMAIN_XTAL resulted in error:" + (int)err);
+  }
+  err = esp_sleep_pd_config(ESP_PD_DOMAIN_CPU, ESP_PD_OPTION_OFF);
+  if (err != ESP_OK) {
+    pr("esp_sleep_pd_config for ESP_PD_DOMAIN_CPU resulted in error:" + (int)err);
+  }
+  err = esp_sleep_pd_config(ESP_PD_DOMAIN_MODEM, ESP_PD_OPTION_OFF);
+  if (err != ESP_OK) {
+    pr("esp_sleep_pd_config for ESP_PD_DOMAIN_MODEM resulted in error:" + (int)err);
+  }
+  err = esp_sleep_pd_config(ESP_PD_DOMAIN_VDDSDIO, ESP_PD_OPTION_OFF);
+  if (err != ESP_OK) {
+    pr("esp_sleep_pd_config for ESP_PD_DOMAIN_VDDSDIO resulted in error:" + (int)err);
+  }
+  */
 
   // initialize the pushbutton pin as an input:
   pinMode(buttonPin, INPUT);
   buttonState = 0;
 
   //Increment boot number and print it every reboot
-  ++bootCount;
-  pr("Boot number: " + String(bootCount));
+  #if DEBUG == true
+    ++bootCount;
+    pr("Boot number: " + String(bootCount));
+  #endif
 
   // SPI setup
   SPIClass * fspi = new SPIClass(FSPI);
@@ -100,7 +209,7 @@ void setup() {
   pinMode(fspi->pinSS(), OUTPUT); //VSPI SS
 
   // Initialize the SD card
-  if (!SD.begin(FSPI_SS,*fspi)) {
+  if (!SD.begin(FSPI_SS, *fspi)) {
     pr("Card failed, or not present");
     // If card isn't found, deep sleep.
     esp_deep_sleep_start();
@@ -151,92 +260,41 @@ void setup() {
     }
   #endif
 
-  now = rtc.now();
-  if (compileTime > now) {
-    pr("RTC time behind CompileTime. Resetting");
-    #if PCF8523 == true
-      pr("RTC PCF8523");
-      rtc.adjust(compileTime);
-      rtc.start();
-    #endif
-    #if DS1307 == true
-      pr("RTC DS1307");
-      rtc.adjust(compileTime);
-    #endif
+  #if RTC_CHECK_COMPILE_TIME == true
+    now = rtc.now();
+    if (compileTime > now) {
+      pr("RTC time behind CompileTime. Resetting");
+      #if PCF8523 == true
+        pr("RTC PCF8523");
+        rtc.adjust(compileTime);
+        rtc.start();
+      #endif
+      #if DS1307 == true
+        pr("RTC DS1307");
+        rtc.adjust(compileTime);
+      #endif
   }
+  #endif
     
   pr("RTC is running. Datetime:");
   pr(rtc.now().timestamp());
 }
 
+esp_sleep_wakeup_cause_t wakeup_reason;
+
 void loop() {
-  esp_sleep_wakeup_cause_t wakeup_reason;
   wakeup_reason = esp_sleep_get_wakeup_cause();
 
   // If the board woke up from deep sleep via rain gauge/button, we're golden! Time to log!
   if(wakeup_reason == 7) {
     pr("Button has been pressed. Time to LOG.");
+    // Log to SD card!
+    writeLog();
 
-    now = rtc.now();
-    txtFile = SD.open(filename, FILE_APPEND);
-    
-    // CSV format:
-    // chipId, timestamp, unixtime, secondstime, (temp), (humidity), (batteryLevel)
-    // Example: 7598744,2022-09-19T16:11:03,1663603863,716919063
-    // TODO: Build string ahead of time. 
-    txtFile.print(chipId);
-    txtFile.print(',');
-    txtFile.print(now.timestamp());
-    txtFile.print(',');
-    txtFile.print(now.unixtime());
-    txtFile.print(',');
-    txtFile.print(now.secondstime());    
-    txtFile.println();
-  
-    txtFile.close();
-
-    // Wifi!
-    WiFi.mode(WIFI_STA);
-    WiFi.disconnect();
-    WiFi.begin("CIA Watchdog", "Baconjob!");
-    pr("Connecting to 'CIA Watchdog' ...");
-    int retries = 0;
-    while (WiFi.status() != WL_CONNECTED) {
-      delay(100);
-      retries++;
-    }
-    pr("Connected after this many 100ms retries:");
-    pr(retries);
-    pr(WiFi.localIP().toString());
-
-    // Sending HTTP requests
-    HTTPClient http;
-
-    String serverPath = "http://satanize.me:2700/log";
-    pr("About to send to");
-    pr(serverPath);
-    http.begin(serverPath.c_str());
-    http.addHeader("Content-Type", "application/json");
-
-    String payload = composeLog(chipId, now.timestamp(), bootCount, compileTime.timestamp());
-    
-    pr("POSTing payload:");
-    pr(payload);
-    int httpResponseCode = http.POST(payload);
-
-    if (httpResponseCode > 0) {
-      pr("HTTP Response code: ");
-      pr(httpResponseCode);
-      String payload = http.getString();
-      pr(payload);
-    }
-    else {
-      pr("Error code: ");
-      pr(httpResponseCode);
-    }
-    // Free resources
-    http.end();
-    WiFi.disconnect();
+    // Connect to wifi and send log to loggo
+    #if WEB == true
+      sendLog();
+    #endif
 
     // Section to wait until the button is unpressed, to not have bounced signal/logs that happen very quickly.
     do {

@@ -296,3 +296,10 @@ Learning to use the Power Profiler Kit II:
 https://www.nordicsemi.com/Products/Development-hardware/Power-Profiler-Kit-2
 
 
+Hooked up Rainus to the PPK2 and found that idle Amp usage:
+1-2mA
+max spikes to 100mA
+
+With a 2500mAh battery, it would last between 50 and 100 days.
+
+
