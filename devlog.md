@@ -303,3 +303,7 @@ max spikes to 100mA
 With a 2500mAh battery, it would last between 50 and 100 days.
 
 
+2023-05-11
+Ordered first version of boards from JLCPCB:
+OrderId: Y1-6005729A
+
