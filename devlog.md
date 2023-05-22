@@ -307,3 +307,7 @@ With a 2500mAh battery, it would last between 50 and 100 days.
 Ordered first version of boards from JLCPCB:
 OrderId: Y1-6005729A
 
+2023-05-21
+Put together one of the 10 mother/child boards!
+Using ethernet cables to connect them. Details later.
+Just deployed the board outside with an 18650 batter that's measuring 4.14V

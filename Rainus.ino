@@ -6,12 +6,28 @@
 #include "Arduino.h"
 #include "esp_adc_cal.h"
 
+//// Rainus version
+// NOTE: ONE XOR THE OTHER MUST BE true
+#define R1  false
+#define R2  true
+
 
 //// SPI/SD Card section
-#define FSPI_MISO   5
-#define FSPI_MOSI   7
-#define FSPI_SCLK   6
-#define FSPI_SS     10
+
+#if R1 == true
+  #define FSPI_MISO   5
+  #define FSPI_MOSI   7
+  #define FSPI_SCLK   6
+  #define FSPI_SS     10
+#endif
+
+#if R2 == true
+  #define FSPI_MISO   10
+  #define FSPI_MOSI   6
+  #define FSPI_SCLK   7
+  #define FSPI_SS     5
+#endif
+
 
 // Rainus log file (Don't forget the leading slash! eg "/rainLog.txt")
 const char filename[] = "/rainLog.txt";
@@ -206,7 +222,7 @@ void setup() {
   // SPI setup
   SPIClass * fspi = new SPIClass(FSPI);
   fspi->begin(FSPI_SCLK, FSPI_MISO, FSPI_MOSI, FSPI_SS); //SCLK, MISO, MOSI, SS
-  pinMode(fspi->pinSS(), OUTPUT); //VSPI SS
+  // pinMode(fspi->pinSS(), OUTPUT); //VSPI SS
 
   // Initialize the SD card
   if (!SD.begin(FSPI_SS, *fspi)) {
