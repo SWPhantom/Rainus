@@ -29,7 +29,7 @@ Did NOT install drivers.
 
 Added gk to the dialout group in Linux. 
 Added read/write perms to ttyusb0.
-	Noticed that the first time the device was plugged in, it routed to ttyusb0. BUT second time it was connected, it was routed to ttyacm0 device.
+  Noticed that the first time the device was plugged in, it routed to ttyusb0. BUT second time it was connected, it was routed to ttyacm0 device.
 Added read/write perms to ttyacm0 as well.
 
 Confusing part was the extra remapping to acm0
@@ -87,7 +87,7 @@ https://forum.arduino.cc/t/appending-datas-to-file-instead-of-recreating-the-fil
 Got the I2C RTC working using 
 https://create.arduino.cc/projecthub/electropeak/interfacing-ds1307-rtc-module-with-arduino-make-a-reminder-08cb61
 Had to initialize the RTC and start its running with
-	rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+  rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
 
 
 2022-09-19 00 13
@@ -240,25 +240,25 @@ This doesn't seem to make sense. As far as I thought, if the main battery is plu
 This indicates that my test device needs to go in and a documented, rigorous test should be done:
 
 1. Take out RTC Coin Cell Battery (rtcbat) and 16340 Main Battery (mainbat) 
-	- This should set the RTC to unpowered/not started.
+  - This should set the RTC to unpowered/not started.
 2. Turn off the board and put in charged rtcbat and mainbat
 3. Connect board to a computer with the latest rainus.ino in Arduino and flash it.
 4. Press the rain button a few times over a few minutes.
-	- Readings should increment in time as expected.
+  - Readings should increment in time as expected.
 5. Remove mainbat. Wait a few minutes.
 6. Put in mainbat.
 7. Press the rain button a few times over a few minutes.
-	- Readings should STILL increment in time as expected. Time should NOT have reset.
+  - Readings should STILL increment in time as expected. Time should NOT have reset.
 8. Remove rtcbat. Wait a few minutes.
 9. Press the rain button a few times over a few minutes.
-	- [ ] Verify what happens here. I expect that the time would have reset on every button press???
+  - [ ] Verify what happens here. I expect that the time would have reset on every button press???
 10. Put in rtcbat. Wait a few minutes.
 11. Press the rain button a few times over a few minutes.
-	- [ ] Readings should have reset again, BUT will now increase in time as expected.
+  - [ ] Readings should have reset again, BUT will now increase in time as expected.
 12. Remove rtcbat and mainbat. 
 13. Put in rtcbat and mainbat.
 14. Press the rain button a few times over a few minutes.
-	- [ ] Readings should have reset again, and will increase in time as expected.
+  - [ ] Readings should have reset again, and will increase in time as expected.
 
 Further, I'll need to comment out the battery time reset logic. If the RTC's `rtc.lostPower()` is true, it may still carry a memory of the last time???
 I'm pretty sure if `rtc.initialized()` is true, the time has been wiped, though.
@@ -307,7 +307,67 @@ With a 2500mAh battery, it would last between 50 and 100 days.
 Ordered first version of boards from JLCPCB:
 OrderId: Y1-6005729A
 
+2023-05-17
+Boards arrived! Extremely fast shipping. 
+Put together one of the prototype boards.
+Takeaways/discoveries/todos:
+* Make sure the through hole diameters are larger. .6/.7 work, but they're a bit tight for the pins I have.
+  * .9mm should be great.
+* RJ12/13 connectors do NOT fit into JR45.
+  * Order and use JR13 connectors Get the 6 pin 6 position ones.
+* I routed the data cables backwards for the SD card reader...
+  * Changed the Rainus compile code.
+* No ground plane.
+  * Rerouted connections and added groundplane.
+* Battery power on Mother board awkwardly placed.
+  * Routed power directly under the Lilygo's power inputs for short, easy-to-solder connections.
+* Corners rounded for next version.
+* Improved silkscreen layer
+* Replaced/rerouted resistor. Using an 0805/2012 4.7K SMD Resistor
+* Separated connections to different layers, to minimize roundabout paths.
+
 2023-05-21
 Put together one of the 10 mother/child boards!
-Using ethernet cables to connect them. Details later.
+Using ethernet cables to connect them.
+Manually soldering conductors to through holes. Tedious process. I should use actual Ethernet jacks...
+
 Just deployed the board outside with an 18650 batter that's measuring 4.14V
+
+2023-06-10
+Replacing the test rainus battery
+Old Battery: 3.97V (.17V drop)
+New Battery: 3.92V
+
+2023-06-07
+Rainus 1.2 boards ordered.
+
+2023-06-17
+Rainus 1.2 boards left LA import facilities! Should be here this week.
+Need to try out different containers after a sample board is assembled.
+
+Maybe different containers for the mother and child boards.
+Child board is more water-sensitive, due to SD card and battery. I bought
+`MAKERELE Wire Strain Relief NPT 3/8”Nylon Cord Grips Cable Glands Cable Gland Joints`
+from Amazon, which should keep water ingress minimal with the child board.
+I also ordered
+`ANMBEST 10PCS M23 Shielded RJ45 Waterproof Cat5/5e/6 8P8C Connector IP67 Ethernet LAN Cable Connector Double Head Outdoor LAN Coupler Adapter Female to Female`
+Which are laaarge, but should make the interface between the ethernet cables free from water ingress, too.
+
+Idea will be to have a completely water-resistance child board module, which will consist of
+
+
+
+                  __________________
+LAN coupler      |child board in box|
+==}-------------[|]-¬ ___           |
+          strain |  L|   |[===]     |
+          relief |   |___|    batt  |
+                 |   []sd           |
+                 |     card         |
+                 |__________________|
+
+
+I'll make 2x of these than the Rainus main boards, so that these can be swapped out and have their SD cards replaced in a non-wet-cave environment.
+
+I'll have to build the ethernet cables AFTER they go through the strain relief gland, as the male ethernet plug will not fit through...
+
