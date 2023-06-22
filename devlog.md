@@ -371,3 +371,16 @@ I'll make 2x of these than the Rainus main boards, so that these can be swapped 
 
 I'll have to build the ethernet cables AFTER they go through the strain relief gland, as the male ethernet plug will not fit through...
 
+
+2023-06-22
+Put together a mother board and 2 child boards to test out swapping out the child boards.
+Issue found!
+
+Looks like when we disconnect power from the board quickly, the RTC doesn't have enough time to swap power from vcc to battery:
+https://www.nxp.com/docs/en/data-sheet/PCF8523.pdf (page 53-54). We should include an "rc network on the vcc pin"... So I need to figure out what that means and how to do it >_>
+
+Furthermore, geokon and I talked about the possibility of simplifying this project by changing the RJ13 cable ffrom the rain gauge to two plugs.
+That way, the whole Rainus system can be on a single board again, inside of a waterproof container, and have two connectors resistant to water ingress
+to plug the rain gauge wires into.
+
+Need to test how I can do that and how the process can be repeatable.
