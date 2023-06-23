@@ -2,7 +2,7 @@
 Measure rain in exotic places, remote locations, away from power sources and civilization!
 
 This frankenstein of easy-to-purchase devices lets you log rainfall data to an SD card.  
-It efficiently runs off battery and can store as much logging data as the storage you bequeath it.
+It efficiently runs off a battery and can store as much logging data as the storage you bequeath it.
 
 This repo contains:
 * Arduino code for the ESP32 C3 TTGO T-OI PLUS ESP32-C3 board
@@ -11,6 +11,60 @@ This repo contains:
 
 Example output data from the field-test Rainus device (headers and notes added for exaplnation):  
 [Google Sheets](https://docs.google.com/spreadsheets/d/1Qej0Jb0RguejD68-Whe8UmjqHHGkIUU_zKdhaDspYHQ)
+
+Currently, this is designed to work with a [rain gauge like this](https://www.scientificsales.com/6466-Davis-AeroCone-Rain-Gauge-with-Mountable-Base-p/6466.htm)
+Essentially, it's a device that closes a circuit. The ones we currently have use an RJ12 6p6c connector, and the Rainus is (unfortunately) built around it. 
+
+Generally speaking, though, the Rainus Does A Thing when a circuit is closed.
+### Steps of Operation
+# An external device connects VCC to a pin.
+# Rainus wakes up from a deep sleep
+# Checks if the SD card is present and accessible
+# Checks if the RTC is present and accessible
+# Writes a log to SD card with the current time, the chip id, etc
+
+
+## Rainus 1.0
+Parts soldered onto a hand-etched PCB. Single board, stuffed into a cheap, plastic food container.
+8 units deployed to Thailand!
+
+A 16340 battery and SD card are replaced on a schedule, where our Thai cave-master, Nong, treks to the Rainuses, opens up the sandwich box, and replaces the battery and SD card in-situ.
+
+There are problems with Rainus 1.0:
+* Excess moisture in the caves seems to be shorting traces, draining the main 16340 battery, and maybe draining the RTC coincell battery.
+* Replacing the SD card and battery in a cave environment is fiddly work.
+
+## Rainus 1.2 (In development)
+Several upgrades over 1.0:
+* Increased battery: 18650 batteries are larger, seemingly more ubiquitous, and less likely to be sold under false pretenses...
+* Waterproofing via [Silicone Conformal Coating](https://www.amazon.com/gp/product/B085G42TGS)
+* PCB designed in KiCad, and manufactured through jlcpcb
+
+This version of the Rainus is split into two sections:
+The Mother unit and the Child unit.
+
+The Mother has the ESP32 board and the RTC, which keeps the time. It also has female RJ12 and RJ45 ports to connect to the rain gauge and the Child, respectively. The child is enclosed in a non-waterproof box, with incoming cables going through a hot-glued (or equivalent) slit in the box. 
+
+The Child has the SD card reader with SD card and the battery. It has a single RJ45 port that connects to the Mother. The Child is enclosed in a waterproof box, with an ethernet cable that goes through a gasket-sealed port.
+
+The ethernet cable coming out of the Child goes into a waterproof Ethernet coupler. Another ethernet cable connects to the other side of said coupler and connects to the Mother. 
+
+The intent is for our Cave Technician to come to the Rainus device with a replacement Child box (with a recharged battery and empty SD Card), disconnect the waterproof ethernet coupler between the current Mother and Child, and replace the old Child with the new Child, and reconnect the boxes. The old child will then be taken to a controlled location (without cave moisture...), and the battery and SD card will be taken out and processed.
+
+A Grove moisture/temperature sensor may be added to the Mother unit. Waiting for deliveries from Seeed now.
+
+There are problems with the Rainus 1.2:
+* Separate units, connections between units, etc are more costly.
+* Multiple units are more bulky to ship.
+* If we change the RJ12 plug coming out of the rain gauge to two plugs that can be plugged into waterproof ports on a box, we don't have to worry about moisture and greatly simplify the Rainus design.
+* COST.
+
+Current transient problem:
+* When the Child unit is disconnected (or the battery removed), the RTC doesn't swap to its coincell battery quickly enough. I saw on some forums that this can be solved by adding an `rc network` to the VCC input, to allow the RTC to switch between the VCC to battery. I'll need to redisign the PCB to have that.
+* Though most parts of the boards are covered in silicone, the USB-C port is not. This may be problematic still. May need to stuff the port with a rubber thing. We shall see!
+
+## Rainus 1.3 (Proposed)
+Back to a single-board design!
 
 ## Bill of Materials
 * LILYGO® TTGO T-OI PLUS RISC-V ESP32-C3
