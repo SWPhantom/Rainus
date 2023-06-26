@@ -384,3 +384,15 @@ That way, the whole Rainus system can be on a single board again, inside of a wa
 to plug the rain gauge wires into.
 
 Need to test how I can do that and how the process can be repeatable.
+
+
+2023-06-25
+[DHT 20 Seeed Temperature/Humidity Grove sensor](https://www.seeedstudio.com/Grove-Temperature-Humidity-Sensor-V2-0-DHT20-p-4967.html) working! The Lilygo board doesn't use the correct layout for its Grove connector, so I had to shift around the crimped wires.
+
+Things to do/think about:
+1. Power usage with the new sensor
+2. If using sensor, we DO want to expose it to the surroundings. How to do it? Either have a slit in the box with the less-sensitive parts (if keeping the 2-box system)
+3. If using sensor, and if sensor is borked, gonna log default -666.0 values for temp and humidity, but otherwise log, cuz it's a secondary measuring thing
+4. If using sensor, and using two boxes, probably keep using the rain gauge RJ12 connector
+5. If not using sensor, how to connect two separate wires from the gauge to the box in a waterproof way?
+6. If using sensor, AND we want to use a single, waterproof box, how to connect SIX separate wires (4 for Grove, 2 for rain gauge) in a waterproof way to box?

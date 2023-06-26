@@ -1,10 +1,20 @@
 #include <SD.h>
 #include <Wire.h>
 #include "RTClib.h"
-#include <WiFi.h>
-#include <HTTPClient.h>
 #include "Arduino.h"
 #include "esp_adc_cal.h"
+
+#define TEMPSENSOR true
+#if TEMPSENSOR == true
+  #include "DHT.h"
+  #define DHTTYPE DHT20
+#endif
+
+#define WEB false
+#if WEB == true
+  #include <WiFi.h>
+  #include <HTTPClient.h>
+#endif
 
 //// Rainus version
 // NOTE: ONE XOR THE OTHER MUST BE true
@@ -13,7 +23,6 @@
 
 
 //// SPI/SD Card section
-
 #if R1 == true
   #define FSPI_MISO   5
   #define FSPI_MOSI   7
@@ -58,13 +67,17 @@ DateTime now;
 RTC_DATA_ATTR int bootCount = 0;
 
 //// Debug/Helpers
-#define WEB false
 #define DEBUG true
 void pr(char * input) {
   #if DEBUG == true
     Serial.println(input);
   #endif
 }
+
+//// Temperature/Humidity Sensor
+#if TEMPSENSOR == true
+  DHT dht(DHTTYPE);
+#endif
 
 // Print quick function. If DEBUG is on, pr() will print to serial out.
 void pr(StringSumHelper input) {
@@ -80,12 +93,27 @@ void pr(StringSumHelper input) {
   long int t2;
 #endif
 
+#if TEMPSENSOR == true
+#endif
+
 void writeLog() {
   now = rtc.now();
+  
+  #if TEMPSENSOR == true
+    float temp_hum_val[2] = {0};
+    if (!dht.readTempAndHumidity(temp_hum_val)) {
+      // Default result is in Celcius
+      temp_hum_val[1] = temp_hum_val[1];
+    } else {
+        temp_hum_val[0] = -666.0;
+        temp_hum_val[1] = -666.0;
+    }
+  #endif
+
   txtFile = SD.open(filename, FILE_APPEND);
   
   // CSV format:
-  // chipId, timestamp, unixtime, secondstime, (temp), (humidity), (batteryLevel)
+  // chipId, timestamp, unixtime, secondstime, (temp (C)), (humidity)
   // Example: 7598744,2022-09-19T16:11:03,1663603863,716919063
   // TODO: Build string ahead of time. 
   txtFile.print(chipId);
@@ -95,6 +123,12 @@ void writeLog() {
   txtFile.print(now.unixtime());
   txtFile.print(',');
   txtFile.print(now.secondstime());
+  #if TEMPSENSOR == true
+    txtFile.print(',');
+    txtFile.print(temp_hum_val[1]);
+    txtFile.print(',');
+    txtFile.print(temp_hum_val[0]);
+  #endif
   txtFile.println();
   txtFile.close();
 }
@@ -294,6 +328,11 @@ void setup() {
     
   pr("RTC is running. Datetime:");
   pr(rtc.now().timestamp());
+
+  // Begin the Temperature/Humidity sensor
+  #if TEMPSENSOR == true
+    dht.begin();
+  #endif
 }
 
 esp_sleep_wakeup_cause_t wakeup_reason;
