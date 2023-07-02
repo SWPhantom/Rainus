@@ -396,3 +396,29 @@ Things to do/think about:
 4. If using sensor, and using two boxes, probably keep using the rain gauge RJ12 connector
 5. If not using sensor, how to connect two separate wires from the gauge to the box in a waterproof way?
 6. If using sensor, AND we want to use a single, waterproof box, how to connect SIX separate wires (4 for Grove, 2 for rain gauge) in a waterproof way to box?
+
+2023-07-01
+Designed and ordered the v2.2 Rainus boards!
+
+This is what geokon and I decided:
+This version of Rainus:
+* Contained in one box.
+* Made of the following sensors/parts:
+ESP32 dev board
+SD Card Reader/Writer + SD Card
+PCF8523 RTC + CR1220 battery   <-- Modified to have a solder bump on the board's negative battery terminal
+Seeedstudio Grove - Temperature & Humidity Sensor V2.0 (DHT20)
+18650 Battery Holder + 18650 Battery
+4.7k resistor
+Rain Gauge
+Rain-proof project box (~100X68X50mm)
+Wire
+* Will have the Temperature/Humidity sensor on the outside of the box, with its wires going through a drilled hole in the box.
+* Will have two copper terminals extruding from the box through drilled holes. These are used for the Rain Gauge wires to connect to.
+* The holes will be filles with water-proof epoxy/silicone/other sealant.
+* The Rain Gauge wire will be stripped and split into two parts, with each soldered to an alligator clip, or similar.
+* The battery holder, battery, and SD card will be easily accessible when the box is serviced.
+
+The Rainus box will be wholly replaced when Nong does his rounds. The Rain Gauge's clips will be unclipped from the exposed terminals, the box will be replaced, and the clips will go on the new box's terminals.
+
+The box will be taken to a safe, dry location and will have its 4 screws removed. Then, the 18650 battery and the SD card can be replaced.

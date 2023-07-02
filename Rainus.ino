@@ -16,27 +16,11 @@
   #include <HTTPClient.h>
 #endif
 
-//// Rainus version
-// NOTE: ONE XOR THE OTHER MUST BE true
-#define R1  false
-#define R2  true
-
-
 //// SPI/SD Card section
-#if R1 == true
-  #define FSPI_MISO   5
-  #define FSPI_MOSI   7
-  #define FSPI_SCLK   6
-  #define FSPI_SS     10
-#endif
-
-#if R2 == true
-  #define FSPI_MISO   10
-  #define FSPI_MOSI   6
-  #define FSPI_SCLK   7
-  #define FSPI_SS     5
-#endif
-
+#define FSPI_MISO   5
+#define FSPI_SCLK   6
+#define FSPI_MOSI   7
+#define FSPI_SS     10
 
 // Rainus log file (Don't forget the leading slash! eg "/rainLog.txt")
 const char filename[] = "/rainLog.txt";
@@ -51,17 +35,8 @@ int buttonState = 0;
 uint32_t chipId = 0;
 
 //// RTC/Time/etc
-// NOTE: ONE XOR THE OTHER MUST BE true
-#define PCF8523 true
-#define DS1307 false
 #define RTC_CHECK_COMPILE_TIME true
-
-#if PCF8523 == true
-  RTC_PCF8523 rtc; // Adafruit 3.3v RTC (https://learn.adafruit.com/adafruit-pcf8523-real-time-clock/rtc-with-arduino)
-#endif
-#if DS1307 == true
-  RTC_DS1307 rtc; // RTC that uses 5v (but works with 3.3v...)
-#endif
+RTC_PCF8523 rtc; // Adafruit 3.3v RTC (https://learn.adafruit.com/adafruit-pcf8523-real-time-clock/rtc-with-arduino)
 DateTime compileTime;
 DateTime now;
 RTC_DATA_ATTR int bootCount = 0;
@@ -93,9 +68,6 @@ void pr(StringSumHelper input) {
   long int t2;
 #endif
 
-#if TEMPSENSOR == true
-#endif
-
 void writeLog() {
   now = rtc.now();
   
@@ -108,6 +80,10 @@ void writeLog() {
         temp_hum_val[0] = -666.0;
         temp_hum_val[1] = -666.0;
     }
+    pr("Humidity:");
+    pr(temp_hum_val[1]);
+    pr("Temperature:");
+    pr(temp_hum_val[0]);
   #endif
 
   txtFile = SD.open(filename, FILE_APPEND);
@@ -211,37 +187,6 @@ void setup() {
   if (err != ESP_OK) {
     pr("esp_deep_sleep_enable_gpio_wakeup resulted in error:" + (int)err);
   }
-  /*
-  // Configure deep sleep powerdown options
-  err = esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_OFF);
-  if (err != ESP_OK) {
-    pr("esp_sleep_pd_config for ESP_PD_DOMAIN_RTC_PERIPH resulted in error:" + (int)err);
-  }
-  err = esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_SLOW_MEM, ESP_PD_OPTION_OFF);
-  if (err != ESP_OK) {
-    pr("esp_sleep_pd_config for ESP_PD_DOMAIN_RTC_SLOW_MEM resulted in error:" + (int)err);
-  }
-  err = esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_FAST_MEM, ESP_PD_OPTION_OFF);
-  if (err != ESP_OK) {
-    pr("esp_sleep_pd_config for ESP_PD_DOMAIN_RTC_FAST_MEM resulted in error:" + (int)err);
-  }
-  err = esp_sleep_pd_config(ESP_PD_DOMAIN_XTAL, ESP_PD_OPTION_OFF);
-  if (err != ESP_OK) {
-    pr("esp_sleep_pd_config for ESP_PD_DOMAIN_XTAL resulted in error:" + (int)err);
-  }
-  err = esp_sleep_pd_config(ESP_PD_DOMAIN_CPU, ESP_PD_OPTION_OFF);
-  if (err != ESP_OK) {
-    pr("esp_sleep_pd_config for ESP_PD_DOMAIN_CPU resulted in error:" + (int)err);
-  }
-  err = esp_sleep_pd_config(ESP_PD_DOMAIN_MODEM, ESP_PD_OPTION_OFF);
-  if (err != ESP_OK) {
-    pr("esp_sleep_pd_config for ESP_PD_DOMAIN_MODEM resulted in error:" + (int)err);
-  }
-  err = esp_sleep_pd_config(ESP_PD_DOMAIN_VDDSDIO, ESP_PD_OPTION_OFF);
-  if (err != ESP_OK) {
-    pr("esp_sleep_pd_config for ESP_PD_DOMAIN_VDDSDIO resulted in error:" + (int)err);
-  }
-  */
 
   // initialize the pushbutton pin as an input:
   pinMode(buttonPin, INPUT);
@@ -288,41 +233,25 @@ void setup() {
   compileTime = DateTime(F(__DATE__), F(__TIME__));
 
   // Logic for 8523 RTC
-  #if PCF8523 == true
-    if (!rtc.initialized() || rtc.lostPower()) {
-      pr("PCF8523 RTC is NOT initialized, let's set the time!");
-      pr("Initializing the RTC...");
-      // following line sets the RTC to the date & time this sketch was compiled
-      rtc.adjust(compileTime);
+  pr("Checking PCF8523.\nCurrentTime:");
+  pr(rtc.now().timestamp());
 
-      rtc.start();
-    }
-  #endif
+  if (!rtc.initialized()) {
+    pr("PCF8523 RTC is NOT initialized, let's set the time!");
+    pr("Initializing the RTC...");
+    // following line sets the RTC to the date & time this sketch was compiled
+    rtc.adjust(compileTime);
+    rtc.start();
 
-  // Logic for 1307 RTC
-  #if DS1307 == true
-    if (!rtc.isrunning() ) {
-      pr("DS1307 RTC is NOT initialized, let's set the time!");
-      pr("Initializing the RTC...");
-
-      // following line sets the RTC to the date & time this sketch was compiled
-      rtc.adjust(compileTime);
-    }
-  #endif
+    pr("...done!");
+  }
 
   #if RTC_CHECK_COMPILE_TIME == true
     now = rtc.now();
     if (compileTime > now) {
       pr("RTC time behind CompileTime. Resetting");
-      #if PCF8523 == true
-        pr("RTC PCF8523");
-        rtc.adjust(compileTime);
-        rtc.start();
-      #endif
-      #if DS1307 == true
-        pr("RTC DS1307");
-        rtc.adjust(compileTime);
-      #endif
+      rtc.adjust(compileTime);
+      rtc.start();
   }
   #endif
     
