@@ -422,3 +422,74 @@ Wire
 The Rainus box will be wholly replaced when Nong does his rounds. The Rain Gauge's clips will be unclipped from the exposed terminals, the box will be replaced, and the clips will go on the new box's terminals.
 
 The box will be taken to a safe, dry location and will have its 4 screws removed. Then, the 18650 battery and the SD card can be replaced.
+
+2023-07-09
+A couple weeks ago, I found Paul Price on youtube: https://www.youtube.com/@paulprice . He has long design and assembly videos for his electronics projects.
+Great channel and I've been watching a bunch of his streams to prepare for Rainus 3 work.
+On 2023-07-05, he came out with a video: https://www.youtube.com/watch?v=vbtSqaVAqRw
+He built a data logger that looks like it matches all our needs!
+I talked to him, and got a couple boards to do tests on.
+If the Rainus 2.2 boards do not work for this phase of research, the Bee Data Loggers will be a fantastic fallback.
+In the future, they'll be great boards to scale up the project.
+
+I will still be designing the Rainus 3 board, but trying to find a niche that doesn't overlap with this board (waste of effort and it'll likely be too expensive, time-wise to just redo that board).
+However, a board that matches or improves on the (miniscule) power draw of the Bee Logger, with a simpler power bus, using the small non-antenna ESP32 C3 chips will be a good design and assembly endeavor.
+
+https://github.com/strid3r21, for reference!
+
+2023-07-10
+Received Rainus 2.2 boards!
+
+2023-07-11
+Desoldered all (-3) Rainus 2.1 boards to get the ESP32 dev boards free. Terrible experience. Needed to use a hot air gun and pry the dev boards off. 
+
+2023-07-12
+Had an issue where EVERY ES32 v1.3 board (even the new ones) was not flashing with the following message.
+`A fatal error occurred: Unable to verify flash chip connection (No serial data received.)`
+Which was weird, as I was actively getting Serial data in the Serial monitor with the boards running.
+Searched around, saw that most people said it was a hardware issue. I thought that my desoldering method cooked the ESP32 chips, or the Flash chips.
+However, because the new boards were also not flashing, this was unlikely (unless the new boards were shipped bad...?)
+
+Anyway, I later realized that, when connecting the dev boards to my computer and Arduino IDE and selecting a Board and Port, there are 2+ choices for connecting.
+Specifically, the USB ports:
+* /dev/cu.usbserial-56581020151 Serial Port
+* /dev/cu.wchusbserial56581020151 Serial Port // USE THIS ONE FROM NOW ON
+
+In short, the wch... one was the one that DIDN'T give me upload errors.
+I could have sworn that for the esp32 v1.2 boards either one worked, but my memory is hazy...
+
+
+After the relief that the dev boards are a-ok, I put together one Rainus 2.2 board (without waterproofing/drilling the enclosures)
+
+Spent the day touching the gauge terminals together and logging temperature and humidity around my path in Seattle. Looking good so far.
+
+2023-07-13
+Water stress-test:
+* Put waterproofing silicone on the Rainus 2.2 components and breakout boards
+* Drilled holes into the enclosure (two small holes for the rain gauge terminals, and a larger hole for the Grove wires)
+* Put J-B Weld Plastic Bonder Epoxy in the egress holes
+* Sealed the box and submerged it until water came over the seal and sealed Grove hole
+* Attached the Rain Gauge (with wires stripped and soldered to copper alligator clips) to the exposed terminals on the outside of the box
+* Set my sink to drip water into the Rain Gauge.
+
+2023-07-14
+The Rain Gauge activated every 12-14 seconds. 
+Started at
+0045
+Ended at
+1122
+
+Approximately 38,220 seconds
+
+That SHOULD be 2940 clicks
+
+The rainLogOvernight.txt shows 2613 logs during that time!
+Gonna do some data analysis!
+
+
+
+Thoughts/improvements:
+* When the Grove sensor is not connected, the Rainus doesn't work, and breaks when trying to initialize it. 
+  I'll need to make my own version of the DHT.cpp file. If not initialized, gotta return default values, but let logging keep happening.
+* geokon doesn't like the wires attached to the lid. I agree that it's not the best, but I'm thinking about ease of disassembly. Gonna try to run the wires UNDER the board and come out under the box.
+* Gotta give the SD reader a little more room with its pins. Current angle makes it less-than-perfect during SD/battery swap.

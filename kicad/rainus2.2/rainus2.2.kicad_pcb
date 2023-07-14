@@ -70,7 +70,7 @@
       (mirror false)
       (drillshape 0)
       (scaleselection 1)
-      (outputdirectory "./gerbers/v1.2")
+      (outputdirectory "./gerbers/v2.2")
     )
   )
 
@@ -535,9 +535,9 @@
     (fp_line (start -1 -0.625) (end 1 -0.625) (layer "F.Fab") (width 0.1) (tstamp b942ef49-5990-4ccd-b84e-0d86e94d4d62))
     (fp_line (start -1 0.625) (end -1 -0.625) (layer "F.Fab") (width 0.1) (tstamp ddbabd55-ce3a-4e80-b068-8fc16fd6651c))
     (fp_line (start 1 0.625) (end -1 0.625) (layer "F.Fab") (width 0.1) (tstamp fe53f558-c150-498b-b9e5-319c1783aab6))
-    (pad "1" smd roundrect (at -1 0 180) (size 1.2 1.4) (layers "F.Cu" "F.Paste" "F.Mask") (roundrect_rratio 0.208333)
+    (pad "1" smd roundrect (at -1 0 180) (size 1.2 1.4) (layers "F.Cu" "F.Paste" "F.Mask") (roundrect_rratio 0.2083333333)
       (net 1 "GND") (tstamp 6cc20112-02e2-42b2-a46c-4837ac764b19))
-    (pad "2" smd roundrect (at 1 0 180) (size 1.2 1.4) (layers "F.Cu" "F.Paste" "F.Mask") (roundrect_rratio 0.208333) (tstamp f18e65a0-cdbd-44b5-b392-6c1f7efbd953))
+    (pad "2" smd roundrect (at 1 0 180) (size 1.2 1.4) (layers "F.Cu" "F.Paste" "F.Mask") (roundrect_rratio 0.2083333333) (tstamp f18e65a0-cdbd-44b5-b392-6c1f7efbd953))
     (model "${KICAD6_3DMODEL_DIR}/Resistor_SMD.3dshapes/R_0805_2012Metric.wrl"
       (offset (xyz 0 0 0))
       (scale (xyz 1 1 1))

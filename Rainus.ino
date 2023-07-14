@@ -101,9 +101,9 @@ void writeLog() {
   txtFile.print(now.secondstime());
   #if TEMPSENSOR == true
     txtFile.print(',');
-    txtFile.print(temp_hum_val[1]);
+    txtFile.print(temp_hum_val[1]); // Temperature (c)
     txtFile.print(',');
-    txtFile.print(temp_hum_val[0]);
+    txtFile.print(temp_hum_val[0]); // Humidity
   #endif
   txtFile.println();
   txtFile.close();
@@ -171,6 +171,8 @@ void writeLog() {
 esp_err_t err;
 
 void setup() {
+  setCpuFrequencyMhz(40);
+  
   #if TIMERS == true && DEBUG == true
     t1 = millis();
   #endif
