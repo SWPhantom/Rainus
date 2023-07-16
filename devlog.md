@@ -493,3 +493,9 @@ Thoughts/improvements:
   I'll need to make my own version of the DHT.cpp file. If not initialized, gotta return default values, but let logging keep happening.
 * geokon doesn't like the wires attached to the lid. I agree that it's not the best, but I'm thinking about ease of disassembly. Gonna try to run the wires UNDER the board and come out under the box.
 * Gotta give the SD reader a little more room with its pins. Current angle makes it less-than-perfect during SD/battery swap.
+
+2023-07-16
+Wrote python script to parse rainus output.
+Analyzed the drip data and found that the drip rate slowed down throughout the night. The result data looks good!
+
+![overnight test graph](images/overnightDripTestBreakdown.png?raw=true "Overnight Drip Test Results")
