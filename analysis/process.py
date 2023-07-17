@@ -100,8 +100,8 @@ ax[0].xaxis.set_major_locator(minutes)
 ax[1].xaxis.set_major_locator(minutes)
 
 # Rotate xtick labels for readability
-plt.setp(ax[0].get_xticklabels(), rotation=45, ha="right")
-plt.setp(ax[1].get_xticklabels(), rotation=45, ha="right")
+plt.setp(ax[0].get_xticklabels(), rotation=75, ha="right")
+plt.setp(ax[1].get_xticklabels(), rotation=75, ha="right")
 
 # Add grid lines
 ax[0].grid(True, linestyle='--', alpha=0.6)
