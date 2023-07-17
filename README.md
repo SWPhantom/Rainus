@@ -17,11 +17,12 @@ Essentially, it's a device that closes a circuit. The ones we currently have use
 
 Generally speaking, though, the Rainus Does A Thing when a circuit is closed.
 ### Steps of Operation
-# An external device connects VCC to a pin.
-# Rainus wakes up from a deep sleep
-# Checks if the SD card is present and accessible
-# Checks if the RTC is present and accessible
-# Writes a log to SD card with the current time, the chip id, etc
+* An external device connects VCC to a pin.
+* Rainus wakes up from a deep sleep
+* Checks if the SD card is present and accessible
+* Checks if the RTC is present and accessible
+* Read from sensors, if attached/available
+* Writes a log to SD card with the current time, the chip id, etc
 
 
 ## Rainus 1.0
@@ -34,7 +35,7 @@ There are problems with Rainus 1.0:
 * Excess moisture in the caves seems to be shorting traces, draining the main 16340 battery, and maybe draining the RTC coincell battery.
 * Replacing the SD card and battery in a cave environment is fiddly work.
 
-## Rainus 1.2 (In development)
+## Rainus 2 (In development)
 Several upgrades over 1.0:
 * Increased battery: 18650 batteries are larger, seemingly more ubiquitous, and less likely to be sold under false pretenses...
 * Waterproofing via [Silicone Conformal Coating](https://www.amazon.com/gp/product/B085G42TGS)
@@ -63,7 +64,7 @@ Current transient problem:
 * When the Child unit is disconnected (or the battery removed), the RTC doesn't swap to its coincell battery quickly enough. I saw on some forums that this can be solved by adding an `rc network` to the VCC input, to allow the RTC to switch between the VCC to battery. I'll need to redisign the PCB to have that.
 * Though most parts of the boards are covered in silicone, the USB-C port is not. This may be problematic still. May need to stuff the port with a rubber thing. We shall see!
 
-## Rainus 1.3 (Proposed)
+## Rainus 3 (Proposed)
 Back to a single-board design!
 
 ## Bill of Materials
@@ -90,6 +91,6 @@ Those, however, didn't work and would not be recognized as working SPI devices.
 [Amazon](https://www.amazon.com/dp/B07RVFZ3F3)
 
 * Perfboards/PCBs/etc
-TODO
+JLCPCB-manufactured PCBs to mount our breakout boards on.
 
-This is a collaboration with [George](https://github.com/kxygk), in order to help with his Typhoon PhD research in Thailand.
+This is a collaboration with [George](https://github.com/kxygk), in order to help with his Monsoons PhD research in Thailand.
