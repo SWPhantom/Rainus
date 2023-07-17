@@ -1,4 +1,5 @@
 .DS_Store
+venv/
 .vscode/*
 !.vscode/settings.json
 !.vscode/tasks.json
