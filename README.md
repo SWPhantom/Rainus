@@ -35,7 +35,7 @@ There are problems with Rainus 1.0:
 * Excess moisture in the caves seems to be shorting traces, draining the main 16340 battery, and maybe draining the RTC coincell battery.
 * Replacing the SD card and battery in a cave environment is fiddly work.
 
-## Rainus 2 (In development)
+## Rainus 2.2 (Deprecated)
 Several upgrades over 1.0:
 * Increased battery: 18650 batteries are larger, seemingly more ubiquitous, and less likely to be sold under false pretenses...
 * Waterproofing via [Silicone Conformal Coating](https://www.amazon.com/gp/product/B085G42TGS)
@@ -64,8 +64,12 @@ Current transient problem:
 * When the Child unit is disconnected (or the battery removed), the RTC doesn't swap to its coincell battery quickly enough. I saw on some forums that this can be solved by adding an `rc network` to the VCC input, to allow the RTC to switch between the VCC to battery. I'll need to redisign the PCB to have that.
 * Though most parts of the boards are covered in silicone, the USB-C port is not. This may be problematic still. May need to stuff the port with a rubber thing. We shall see!
 
-## Rainus 3 (Proposed)
+## Rainus 2.3 (Proposed)
 Back to a single-board design!
+Board designed to fit into a [plastic enclosure with a gasket](https://www.amazon.com/dp/B07RTYYHK7).
+Two copper wires stick through the enclosure and act as terminals to connect the rain gauge wires to (soldered to alligator clips).
+A grove connector and temperature/humidity sensor also sticks through the enclosure to read the environment around the unit.
+
 
 ## Bill of Materials
 * LILYGO® TTGO T-OI PLUS RISC-V ESP32-C3
@@ -93,4 +97,4 @@ Those, however, didn't work and would not be recognized as working SPI devices.
 * Perfboards/PCBs/etc
 JLCPCB-manufactured PCBs to mount our breakout boards on.
 
-This is a collaboration with [George](https://github.com/kxygk), in order to help with his Monsoons PhD research in Thailand.
+This is a collaboration with [George](https://github.com/kxygk), in order to help with his Monsoon PhD research in Thailand.
