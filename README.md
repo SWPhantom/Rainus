@@ -43,7 +43,7 @@ There are problems with Rainus 1.0:
 * Excess moisture in the caves seems to be shorting traces, draining the main 16340 battery, and maybe draining the RTC coincell battery.
 * Replacing the SD card and battery in a cave environment is fiddly work.
 
-## Rainus 2.2 (Deprecated)
+## Rainus 2.1 (Deprecated)
 Several upgrades over 1.0:
 * Increased battery: 18650 batteries are larger, seemingly more ubiquitous, and less likely to be sold under false pretenses...
 * Waterproofing via [Silicone Conformal Coating](https://www.amazon.com/gp/product/B085G42TGS)
@@ -62,7 +62,7 @@ The intent is for our Cave Technician to come to the Rainus device with a replac
 
 A Grove moisture/temperature sensor may be added to the Mother unit. Waiting for deliveries from Seeed now.
 
-There are problems with the Rainus 1.2:
+There are problems with the Rainus 2.1:
 * Separate units, connections between units, etc are more costly.
 * Multiple units are more bulky to ship.
 * If we change the RJ12 plug coming out of the rain gauge to two plugs that can be plugged into waterproof ports on a box, we don't have to worry about moisture and greatly simplify the Rainus design.
@@ -72,7 +72,7 @@ Current transient problem:
 * When the Child unit is disconnected (or the battery removed), the RTC doesn't swap to its coincell battery quickly enough. I saw on some forums that this can be solved by adding an `rc network` to the VCC input, to allow the RTC to switch between the VCC to battery. I'll need to redisign the PCB to have that.
 * Though most parts of the boards are covered in silicone, the USB-C port is not. This may be problematic still. May need to stuff the port with a rubber thing. We shall see!
 
-## Rainus 2.3 (Proposed)
+## Rainus 2.2
 Back to a single-board design!
 Board designed to fit into a [plastic enclosure with a gasket](https://www.amazon.com/dp/B07RTYYHK7).
 Two copper wires stick through the enclosure and act as terminals to connect the rain gauge wires to (soldered to alligator clips).
