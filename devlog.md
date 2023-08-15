@@ -499,3 +499,40 @@ Wrote python script to parse rainus output.
 Analyzed the drip data and found that the drip rate slowed down throughout the night. The result data looks good!
 
 ![overnight test graph](images/overnightDripTestBreakdown.png?raw=true "Overnight Drip Test Results")
+
+
+2023-08-14
+1st Rainus v2.2 adventures:
+Had the same battery in it since 2023-07-12
+Currently at 4.07v
+Unfortunately... I'm not sure what the battery voltage was exactly when I started, but the other batteries, which had not been plugged in are all between
+3.96 to 4.14 (most between 4.01 and 4.08)
+That means that the battery, at worst, went down .7 more than the most charged battery.
+
+That SEEMS like good news!
+Not sure what the battery cutoff will be for the ESP32 board, but it will LIKELY last for more than 3 months, assuming a well-built battery.
+
+Over that time, we logged about 38000 entries (2.4MB)!
+
+Some days of operation, the Rainus withstood 16 to 47 degrees celcius and rain directly on the outside of the box and temp/humidity sensor!
+
+Still ticking.
+
+One thing to think about is the blackness of the box. If in direct sunlight, it may give weird temperature readings, as the temperature sensor is facing
+the top of the box, which probably heats up extra when in direct sunlight. Maybe Rainus boxes meant for outdoor use should have a foil tape taped
+under the rain sensor, so as not to heat up from direct sunlight.
+
+
+Also, waiting for 4 rain gauges to arrive at my house.
+
+My currect Rainus v2.2 status:
+1 Complete
+2 In Boxes, needing to get programmed
+17 Out of boxes, need to have their boxes drilled and sealed, need to get programmed, and may need to have their terminal wires put on backwards,
+so that the lid of the box has the sensor and terminals.
+
+Learnings/TODOs
+* Putting the terminals and sensor on the bottom side of the box, with wires routed under the circuit board looks nicer, but is a horrible pain to assemble. Pity to the ones that have to take the boards out to program them later...
+* Need to order 12 alligator clips to send away to Thailand.
+* I ran out of SD card readers! Surprising! But have the perfect amount for the 20 to be sent
+* Need to order more SD cards, likely...
