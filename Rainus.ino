@@ -6,8 +6,8 @@
 
 #define TEMPSENSOR true
 #if TEMPSENSOR == true
-  #include "DHT.h"
-  #define DHTTYPE DHT20
+  #include "DHT20.h"
+  DHT20 DHT;
 #endif
 
 #define WEB false
@@ -49,11 +49,6 @@ void pr(char * input) {
   #endif
 }
 
-//// Temperature/Humidity Sensor
-#if TEMPSENSOR == true
-  DHT dht(DHTTYPE);
-#endif
-
 // Print quick function. If DEBUG is on, pr() will print to serial out.
 void pr(StringSumHelper input) {
   #if DEBUG == true
@@ -70,21 +65,6 @@ void pr(StringSumHelper input) {
 
 void writeLog() {
   now = rtc.now();
-  
-  #if TEMPSENSOR == true
-    float temp_hum_val[2] = {0};
-    if (!dht.readTempAndHumidity(temp_hum_val)) {
-      // Default result is in Celcius
-      temp_hum_val[1] = temp_hum_val[1];
-    } else {
-        temp_hum_val[0] = -666.0;
-        temp_hum_val[1] = -666.0;
-    }
-    pr("Humidity:");
-    pr(temp_hum_val[1]);
-    pr("Temperature:");
-    pr(temp_hum_val[0]);
-  #endif
 
   txtFile = SD.open(filename, FILE_APPEND);
   
@@ -100,10 +80,34 @@ void writeLog() {
   txtFile.print(',');
   txtFile.print(now.secondstime());
   #if TEMPSENSOR == true
+    // Set default values for the temp/humidity sensor
+    float default_value = -666.0;
+    float humidity = default_value;
+    float temperature = default_value;
+    int status = -1;
+
+    // Async request data read, sleep for 80ms, read data, and convert
+    status = DHT.requestData();
+    delay(80);
+    DHT.readData();
+    status = DHT.convert();
+
+    // If the DHT read was successful, set the found values. If not, keep the default values
+    if (status == DHT20_OK) {
+      humidity = DHT.getHumidity();
+      temperature = DHT.getTemperature();
+    }
+
+    pr("Humidity:");
+    pr(humidity);
+    pr("Temperature:");
+    pr(temperature);
+
+    // Write to log file
     txtFile.print(',');
-    txtFile.print(temp_hum_val[1]); // Temperature (c)
+    txtFile.print(temperature); // Temperature (c)
     txtFile.print(',');
-    txtFile.print(temp_hum_val[0]); // Humidity
+    txtFile.print(humidity); // Humidity
   #endif
   txtFile.println();
   txtFile.close();
@@ -262,7 +266,7 @@ void setup() {
 
   // Begin the Temperature/Humidity sensor
   #if TEMPSENSOR == true
-    dht.begin();
+    DHT.begin();
   #endif
 }
 
