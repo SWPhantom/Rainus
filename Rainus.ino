@@ -10,7 +10,7 @@
   DHT20 DHT;
 #endif
 
-#define WEB false
+#define WEB true
 #if WEB == true
   #include <WiFi.h>
   #include <HTTPClient.h>
