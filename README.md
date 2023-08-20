@@ -24,14 +24,30 @@ Generally speaking, though, the Rainus Does A Thing when a circuit is closed.
 1. At the top, select a `wusb...` entry in the connected devices and set the device to `TTGO T-OI PLUS RISC-V ESP32-C3`
 1. Upload the Rainus.ino file and look at the Serial Monitor. You should see Rainus chatter!
 
+### Notes
+* INFO: For accurate time logging, make sure the TIMEZONE_OFFSET is set to a value that makes sense.
+For example, if I'm at PST-0700, I need to set the offset at -7
+The RTC keys off of the compile time of the sketch, which doesn't know about timezones, and assumes that the current datetime (local time) is actually UTC time...
+Not sure of a way to automatically correct for this yet.
+
+* WARNING: The Grove connector on the Lilygo D1 Plus is wired incorrectly. If you're using a Standard grove-grove cable, you MUST modify the side of the cable that enters the Lilygo.
+Sensor side:                  Lilygo side:
+black                         white
+red                           yellow
+white                         red
+yellow                        black
+Failing to do this, or plugging the two sides into the wrong ports will short stuff on either board. I hadn't seen anything fail, but after getting stung from the heat when touching the boards, I quickly unplugged things. YMMW
+
 ### Steps of Operation
 * An external device connects VCC to a pin.
 * Rainus wakes up from a deep sleep
 * Checks if the SD card is present and accessible
 * Checks if the RTC is present and accessible
-* Read from sensors, if attached/available
-* Writes a log to SD card with the current time, the chip id, etc
+* Reads from sensors, if attached/available
+* Writes a log to SD card with:
 
+chipId, timestamp (UTC), unixtime, secondstime, temp (C), humidity (%)
+Example: 7598744,2022-09-19T16:11:03,1663603863,716919063
 
 ## Rainus 1.0
 Parts soldered onto a hand-etched PCB. Single board, stuffed into a cheap, plastic food container.

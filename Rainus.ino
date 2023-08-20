@@ -4,16 +4,11 @@
 #include "Arduino.h"
 #include "esp_adc_cal.h"
 
+// DHT20 Temperature/Humidity sensor
 #define TEMPSENSOR true
 #if TEMPSENSOR == true
   #include "DHT20.h"
   DHT20 DHT;
-#endif
-
-#define WEB false
-#if WEB == true
-  #include <WiFi.h>
-  #include <HTTPClient.h>
 #endif
 
 //// SPI/SD Card section
@@ -26,7 +21,7 @@
 const char filename[] = "/rainLog.txt";
 File txtFile;
 
-//// Rain Gauge
+//// External wakeup pin
 const int buttonPin = 2;
 int buttonState = 0; 
 #define BUTTON_PIN_BITMASK 0x000000004 // 2^33 in hex. defines GPIO pin 2
@@ -40,6 +35,7 @@ RTC_PCF8523 rtc; // Adafruit 3.3v RTC (https://learn.adafruit.com/adafruit-pcf85
 DateTime compileTime;
 DateTime now;
 RTC_DATA_ATTR int bootCount = 0;
+TIMEZONE_OFFSET = -7;
 
 //// Debug/Helpers
 #define DEBUG true
@@ -56,22 +52,14 @@ void pr(StringSumHelper input) {
   #endif
 }
 
-// To measure time!
-#define TIMERS false
-#if TIMERS == true && DEBUG == true
-  long int t1;
-  long int t2;
-#endif
-
 void writeLog() {
   now = rtc.now();
 
   txtFile = SD.open(filename, FILE_APPEND);
   
   // CSV format:
-  // chipId, timestamp, unixtime, secondstime, (temp (C)), (humidity)
+  // chipId, timestamp (UTC), unixtime, secondstime, temp (C), humidity (%)
   // Example: 7598744,2022-09-19T16:11:03,1663603863,716919063
-  // TODO: Build string ahead of time. 
   txtFile.print(chipId);
   txtFile.print(',');
   txtFile.print(now.timestamp());
@@ -113,73 +101,10 @@ void writeLog() {
   txtFile.close();
 }
 
-#if WEB == true
-  String composeLog(uint32_t chipId, String logTimestamp, int bootCount, String compileTimestamp) {
-    String pre1 = "{\"user\":\"";
-    String pre2 = "\",\"collection\":\"";
-    String pre3 = "\",\"datetime\":\"";
-    String pre4 = "\",\"data\":\"BootNumber:";
-    String pre5 = ", logTimestamp: ";
-    String pre6 = "\"}";
-    return pre1 + "rainus_profiler" + pre2 + String(chipId) + pre4 + String(bootCount) + pre5 + logTimestamp +pre6;
-  }
-
-  String ssid = "";
-  String password = "";
-  String serverPath = "";
-  HTTPClient http;
-  String payload;
-  int httpResponseCode;
-
-  void sendLog() {
-    WiFi.mode(WIFI_STA);
-    WiFi.disconnect();
-    WiFi.begin(ssid, password);
-    int retries = 0;
-    while (WiFi.status() != WL_CONNECTED) {
-      delay(100);
-      retries++;
-    }
-    pr("Connected after this many 100ms retries:");
-    pr(retries);
-    pr(WiFi.localIP().toString());
-
-    // Send log to server
-    pr("About to send to");
-    pr(serverPath);
-    http.begin(serverPath.c_str());
-    http.addHeader("Content-Type", "application/json");
-
-    payload = composeLog(chipId, now.timestamp(), bootCount, compileTime.timestamp());
-    
-    pr("POSTing payload:");
-    pr(payload);
-    httpResponseCode = http.POST(payload);
-
-    if (httpResponseCode > 0) {
-      pr("HTTP Response code: ");
-      pr(httpResponseCode);
-      String payload = http.getString();
-      pr(payload);
-    }
-    else {
-      pr("Error code: ");
-      pr(httpResponseCode);
-    }
-    // Free resources
-    http.end();
-    WiFi.disconnect();
-  }
-#endif
-
 esp_err_t err;
 
 void setup() {
   setCpuFrequencyMhz(40);
-  
-  #if TIMERS == true && DEBUG == true
-    t1 = millis();
-  #endif
 
   Serial.begin(9600);
   while (!Serial);
@@ -198,16 +123,9 @@ void setup() {
   pinMode(buttonPin, INPUT);
   buttonState = 0;
 
-  //Increment boot number and print it every reboot
-  #if DEBUG == true
-    ++bootCount;
-    pr("Boot number: " + String(bootCount));
-  #endif
-
-  // SPI setup
+  // SPI setup for SD card
   SPIClass * fspi = new SPIClass(FSPI);
   fspi->begin(FSPI_SCLK, FSPI_MISO, FSPI_MOSI, FSPI_SS); //SCLK, MISO, MOSI, SS
-  // pinMode(fspi->pinSS(), OUTPUT); //VSPI SS
 
   // Initialize the SD card
   if (!SD.begin(FSPI_SS, *fspi)) {
@@ -223,26 +141,28 @@ void setup() {
 	  chipId |= ((ESP.getEfuseMac() >> (40 - i)) & 0xff) << i;
 	}
 
+  //// RTC Setup part!
   // Check if RTC exists
-  // Universal across both RTCs
   if (!rtc.begin()) {
     pr("Couldn't find RTC");
     // BROKEN. WE DONE
     esp_deep_sleep_start();
   }
 
-  // TODO: If RTC has fault, we may want to write to the log to tell researcher that
-  // data may be faulty after a certain point (especially if we reflash, and have sane,
-  // but invalid, time)
-
-  // If the RTC is uninitialized, initialize it with the compilation time
+  // Check the compile time of the sketch
   compileTime = DateTime(F(__DATE__), F(__TIME__));
+  pr("Compile Date and time:");
+  pr(__DATE__);
+  pr(__TIME__);
 
-  // Logic for 8523 RTC
-  pr("Checking PCF8523.\nCurrentTime:");
-  pr(rtc.now().timestamp());
+  compileTime = DateTime(compileTime.unixtime() - (TIMEZONE_OFFSET * 60 * 60));
+  // Check the time the RTC thinks it is
+  pr("Checking PCF8523 RTC.\nCurrentTime:");
+  now = rtc.now();
+  pr(now.timestamp());
 
-  if (!rtc.initialized()) {
+  // If the RTC is not initialized or if the compile time is later than the current chip time, adjust the RTC's clock
+  if (!rtc.initialized() || compileTime > now) {
     pr("PCF8523 RTC is NOT initialized, let's set the time!");
     pr("Initializing the RTC...");
     // following line sets the RTC to the date & time this sketch was compiled
@@ -251,15 +171,6 @@ void setup() {
 
     pr("...done!");
   }
-
-  #if RTC_CHECK_COMPILE_TIME == true
-    now = rtc.now();
-    if (compileTime > now) {
-      pr("RTC time behind CompileTime. Resetting");
-      rtc.adjust(compileTime);
-      rtc.start();
-  }
-  #endif
     
   pr("RTC is running. Datetime:");
   pr(rtc.now().timestamp());
@@ -278,30 +189,17 @@ void loop() {
   // If the board woke up from deep sleep via rain gauge/button, we're golden! Time to log!
   if(wakeup_reason == 7) {
     pr("Button has been pressed. Time to LOG.");
+
     // Log to SD card!
     writeLog();
-
-    // Connect to wifi and send log to loggo
-    #if WEB == true
-      sendLog();
-    #endif
 
     // Section to wait until the button is unpressed, to not have bounced signal/logs that happen very quickly.
     do {
       buttonState = digitalRead(buttonPin);
     } while (buttonState == HIGH);
-
-  } else {
-    pr("Here from reset/startup. Do nothing.");
   }
-  
-  #if TIMERS == true && DEBUG == true
-    t2 = millis();
-    pr("Time Elapsed for Operation(ms): ");
-    pr(t2-t1);
-  #endif
 
-  pr("sleep time!");
+  pr("The time has come for slumber...");
   esp_deep_sleep_start();
-  pr("SENITEE CHEK SHOULD NOT PRINT.");
+  // Program won't get here
 }

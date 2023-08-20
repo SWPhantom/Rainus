@@ -537,3 +537,14 @@ Learnings/TODOs
 * I ran out of SD card readers! Surprising! But have the perfect amount for the 20 to be sent
 * Need to order more SD cards, likely...
 * The Grove wires need to be swapped very specifically ESP32-side. Otherwise, the ESP32 board and/or the temperature/humidity sensor gets PROBMEMATICALLY hot...
+
+
+2023-08-20
+Got news a couple days ago that the extra rain gauges are not coming to my house YET. Will see if that resolves soon.
+
+Found a different DHT20 library to use for the temp/humidity sensors: https://github.com/RobTillaart/DHT20
+Changed the code to log values if found and log default values if not found.
+
+Found an issue with the RTC time setting... Unfortunately, the compile time is assumed to be UTC, but uses local time. I added a UTC offset in the code so that whoever compiles the sketch will set the RTCs to UTC time. This SHOULDN'T be necessary, now that the units have been set, but needs to be called out.
+
+Cleaned up code. No more web/timer stuff. Hopefully it's a LITTLE cleaner...
