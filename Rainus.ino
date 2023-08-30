@@ -35,7 +35,7 @@ RTC_PCF8523 rtc; // Adafruit 3.3v RTC (https://learn.adafruit.com/adafruit-pcf85
 DateTime compileTime;
 DateTime now;
 RTC_DATA_ATTR int bootCount = 0;
-TIMEZONE_OFFSET = -7;
+int TIMEZONE_OFFSET = -7;
 
 //// Debug/Helpers
 #define DEBUG true

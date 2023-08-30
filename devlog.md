@@ -548,3 +548,7 @@ Changed the code to log values if found and log default values if not found.
 Found an issue with the RTC time setting... Unfortunately, the compile time is assumed to be UTC, but uses local time. I added a UTC offset in the code so that whoever compiles the sketch will set the RTCs to UTC time. This SHOULDN'T be necessary, now that the units have been set, but needs to be called out.
 
 Cleaned up code. No more web/timer stuff. Hopefully it's a LITTLE cleaner...
+
+2023-08-29
+Another check of the battery we've been using in the test unit:
+3.89v
