@@ -53,8 +53,10 @@ void pr(StringSumHelper input) {
 }
 
 void writeLog() {
+  vTaskDelay(10);
   now = rtc.now();
 
+  vTaskDelay(10);
   txtFile = SD.open(filename, FILE_APPEND);
   
   // CSV format:
@@ -68,6 +70,8 @@ void writeLog() {
   txtFile.print(',');
   txtFile.print(now.secondstime());
   #if TEMPSENSOR == true
+
+    vTaskDelay(10);
     // Set default values for the temp/humidity sensor
     float default_value = -666.0;
     float humidity = default_value;
