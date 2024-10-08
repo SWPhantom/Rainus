@@ -22,6 +22,7 @@ Generally speaking, though, the Rainus Does A Thing when a circuit is closed.
 1. Connect a Rainus to the computer with a USB-C cable (make sure it can transfer data... many don't...)
 1. If using ArduinoIDE, open the Serial Monitor and set the BAUD rate to 9600
 1. At the top, select a `wusb...` entry in the connected devices and set the device to `TTGO T-OI PLUS RISC-V ESP32-C3`
+1. To compile the sketch you will need to add/install 2 libraries: RTClib, DHT20 
 1. Upload the Rainus.ino file and look at the Serial Monitor. You should see Rainus chatter!
 
 ### Notes
