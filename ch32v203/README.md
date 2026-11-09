@@ -2,8 +2,8 @@
 
 This is a **continuously running bench prototype** for the MuseLab
 nanoCH32V203 v1.1. A board has been flashed from macOS, and its switch input,
-LED, USB diagnostics, and SD log have been checked on the bench. The Linux
-instructions below have not yet been tested with a board. The firmware is not
+LED, USB diagnostics, and SD log have been checked on the bench. The build,
+flashing, and serial workflow has also been tried on Linux. The firmware is not
 field-ready and does not yet implement sleep, automatic retries, event buffering
 during SD writes, or backup power. Use a spare SD card and do not rely on it for
 a deployment.
@@ -79,8 +79,7 @@ make -C ../../ch32fun/minichlink minichlink
 the host-native USB programmer on the computer you're using; don't copy a macOS
 `minichlink` executable onto Linux. If ch32fun is elsewhere, pass its path to
 make, for example `make build CH32FUN_ROOT=/path/to/ch32fun`, and use that
-checkout's `minichlink` path in the commands below. The default device ID in
-the CSV is `BENCH`; change `RAINUS_ID` in `rainus.c` for separate test units.
+checkout's `minichlink` path in the commands below.
 
 ### Flash over USB
 
@@ -178,10 +177,17 @@ earlier CH32 prototype; two new columns identify the time source and build
 floor. Temperature and humidity are not recorded:
 
 ```text
-BENCH,2026-11-09T03:00:00,1794193200,847508400,BUILD,1794193200
+00112233445566778899AABB,2026-11-09T03:00:00,1794193200,847508400,BUILD,1794193200
 ```
 
-The fields are device ID, UTC timestamp, Unix seconds, and seconds since
+The first field is the chip's factory ID, represented by 24 hexadecimal
+characters, including leading zeroes. Bytes are in ascending address order
+from the CH32V203's three UID registers. It identifies the microcontroller,
+not the enclosure or gauge; keep a mapping when assembling or replacing units.
+Verify that IDs remain the same after reflashing and differ across the actual
+boards before relying on them. Earlier records use the literal ID `BENCH`.
+
+The remaining fields are UTC timestamp, Unix seconds, and seconds since
 2000-01-01 UTC, time source (`BUILD` or `SET`), and the embedded build time as
 Unix seconds. `BUILD` means the clock was last initialized or advanced to a
 build-time floor; it does **not** certify that the time is accurate. `SET`
@@ -224,7 +230,8 @@ without holding BOOT. Find the port, then open it in a serial monitor:
   itself as `1209:d035`.
 
 Replace the example port with the one shown on your computer. The board prints
-status about every two seconds; send `?` for another status line. The baud
+status about every two seconds; send `?` for another status line, or `i` to
+request the chip ID. The baud
 setting is conventional for USB CDC, not a physical UART baud rate. Messages
 may be missed when the serial monitor is not open. To exit `screen`, press
 Control-A, then K, and confirm. Close the monitor before trying to flash again.
@@ -263,6 +270,8 @@ the result with an independent counter. Confirm the LED, RTC startup and reset
 retention, time setting, FAT32 as well as FAT16 cards, and missing-card errors.
 Then implement event capture during writes and sleep/wake, and use the power
 profiler to measure the **whole board**, including card and regulator.
+See [power and enclosure notes](POWER_AND_ENCLOSURE.md) for a measurement plan
+and the current hardware constraints.
 
 The `fatfs` directory contains FatFs R0.15 w/patch2 as found in the local
 ESP-IDF checkout, with its copyright and redistribution notice retained in the

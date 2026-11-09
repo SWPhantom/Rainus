@@ -7,4 +7,5 @@
 /rainus.generated.ld
 /tests/event_test
 /tests/time_policy_test
+/tests/chip_id_test
 /tests/fatfs_test

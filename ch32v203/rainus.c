@@ -2,6 +2,7 @@
 #include "fatfs/ff.h"
 #include "rtc.h"
 #include "event.h"
+#include "chip_id.h"
 #include "usbd.h"
 #include <stdio.h>
 #include <string.h>
@@ -13,16 +14,25 @@
 #error Build time must be a valid Unix timestamp between 2020 and 2106.
 #endif
 
-// Give each bench unit a distinct short identifier before building.
-#ifndef RAINUS_ID
-#define RAINUS_ID "BENCH"
-#endif
-
 static FATFS fs;
 static FIL file;
+static char chip_id[CHIP_ID_TEXT_LEN + 1];
 extern volatile unsigned sd_debug_step, sd_debug_response;
 static unsigned error_code, mount_result, events_written;
 static volatile unsigned status_requested;
+static volatile unsigned id_requested;
+
+static void read_chip_id(void)
+{
+    // ch32fun's CH32V20x header defines ESIG->UID0..UID2 at 0x1FFFF7E8.
+    // Read words and encode their bytes in ascending address order.
+    const uint32_t words[3] = { ESIG->UID0, ESIG->UID1, ESIG->UID2 };
+    uint8_t bytes[CHIP_ID_BYTES];
+    for (unsigned i = 0; i < 3; ++i)
+        for (unsigned j = 0; j < 4; ++j)
+            bytes[4 * i + j] = (uint8_t)(words[i] >> (8 * j));
+    chip_id_format(bytes, chip_id);
+}
 
 static const char *source_name(time_source_t source)
 {
@@ -33,6 +43,16 @@ void HandleUSBInput(int numbytes, uint8_t *data)
 {
     for (int i = 0; i < numbytes; ++i)
         if (data[i] == '?' || data[i] == 's' || data[i] == 'S') status_requested = 1;
+        else if (data[i] == 'i' || data[i] == 'I') id_requested = 1;
+}
+
+static void debug_chip_id(void)
+{
+    char text[32];
+    if (!USBDCTX.USBD_DevEnumStatus) return;
+    int n = snprintf(text, sizeof(text), "id=%s\r\n", chip_id);
+    if (n > 0 && (unsigned)n < sizeof(text) &&
+        USBD_SendEndpointNEW(3, (uint8_t *)text, n, 1) == 0) id_requested = 0;
 }
 
 static void debug_status(void)
@@ -57,6 +77,7 @@ static void fail(unsigned pulses)
             led(1); Delay_Ms(150); led(0); Delay_Ms(200);
         }
         poll_input();
+        if (id_requested) debug_chip_id();
         status_requested = 0;
         debug_status();
         Delay_Ms(1200);
@@ -96,7 +117,7 @@ static int write_event(uint32_t seconds, time_source_t source)
     else memcpy(iso, "UNSET", 6);
     // The first four columns match the earlier prototype; the final two show
     // clock provenance and the build floor so stale estimates can be identified.
-    int len = snprintf(line, sizeof(line), "%s,%s,%lu,%lu,%s,%lu\r\n", RAINUS_ID, iso,
+    int len = snprintf(line, sizeof(line), "%s,%s,%lu,%lu,%s,%lu\r\n", chip_id, iso,
                        (unsigned long)(source != TIME_UNSET ? seconds : 0),
                        (unsigned long)(source != TIME_UNSET && seconds >= 946684800UL ? seconds - 946684800UL : 0),
                        source_name(source), (unsigned long)RAINUS_BUILD_UNIX_TIME);
@@ -112,6 +133,7 @@ int main(void)
 {
     SystemInit();
     funGpioInitAll();
+    read_chip_id();
     funDigitalWrite(PA15, FUN_HIGH);
     funPinMode(PA15, GPIO_CFGLR_OUT_10Mhz_PP);
     USBDSetup();
@@ -131,6 +153,7 @@ int main(void)
     unsigned led_tick = 0, status_tick = 0;
     for (;;) {
         poll_input();
+        if (id_requested) debug_chip_id();
         if (status_requested || ++status_tick >= 2000) {
             debug_status();
             status_requested = 0;
