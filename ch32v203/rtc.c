@@ -1,7 +1,6 @@
 #include "ch32fun.h"
 #include "rtc.h"
 
-#define CLOCK_MAGIC 0x5241
 volatile unsigned rtc_debug_step;
 
 static int wait_rtc(uint16_t bit, unsigned timeout_ms)
@@ -62,7 +61,7 @@ int clock_init(void)
     return 1;
 }
 
-int clock_is_set(void) { return BKP->DATAR1 == CLOCK_MAGIC; }
+time_source_t clock_source(void) { return time_source_from_marker(BKP->DATAR1); }
 
 uint32_t clock_seconds(void)
 {
@@ -74,13 +73,14 @@ uint32_t clock_seconds(void)
     return (high << 16) | low;
 }
 
-int clock_set(uint32_t seconds)
+int clock_set(uint32_t seconds, time_source_t source)
 {
+    if (source != TIME_BUILD && source != TIME_SET) return 0;
     BKP->DATAR1 = 0;
     if (!write_begin()) return 0;
     RTC->CNTH = seconds >> 16;
     RTC->CNTL = seconds & 0xffff;
     if (!write_end()) return 0;
-    BKP->DATAR1 = CLOCK_MAGIC;
+    BKP->DATAR1 = source == TIME_BUILD ? TIME_MARKER_BUILD : TIME_MARKER_SET;
     return 1;
 }

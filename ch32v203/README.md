@@ -89,7 +89,21 @@ the CSV is `BENCH`; change `RAINUS_ID` in `rainus.c` for separate test units.
 2. Enter the bootloader: hold **BOOT**, press and release **RST**, then release
    **BOOT**. The bootloader is a different USB device from the running
    firmware, so the serial port may disappear at this point.
-3. From `Rainus/ch32v203`, identify the board and flash the binary:
+3. With only the intended ISP-mode board connected, build and flash it using
+   the computer's current UTC time as the firmware's clock floor:
+
+   ```sh
+   ./deploy.sh
+   ```
+
+   The script checks that the bootloader identifies a CH32V203, obtains the
+   host time, rebuilds, flashes, and requests a reboot. Keep the computer's
+   clock synchronized. It prints the build time so you can check it. Build and
+   flashing take time, so a newly initialized RTC will start slightly behind.
+   If ch32fun is elsewhere, use `CH32FUN_ROOT=/path/to/ch32fun ./deploy.sh`.
+
+   Alternatively, from `Rainus/ch32v203`, identify the board and flash a
+   previously built binary explicitly:
 
    ```sh
    ../../ch32fun/minichlink/minichlink -C isp -i
@@ -97,8 +111,9 @@ the CSV is `BENCH`; change `RAINUS_ID` in `rainus.c` for separate test units.
    ```
 
    The first command should report a CH32V203. The second writes the firmware
-   and requests a reboot. Allow a few seconds for USB to reconnect; press RST
-   once if the application does not start.
+   and requests a reboot. **A previously built binary retains its old build
+   time**; use `./deploy.sh` for a fresh clock floor. Allow a few seconds for
+   USB to reconnect; press RST once if the application does not start.
 
 On Linux, `lsusb` can help identify the device in bootloader mode. The local
 `minichlink` source recognizes bootloader IDs `1a86:55e0` and `4348:55e0`.
@@ -119,38 +134,64 @@ by distribution.
 
 ## Set and check the clock
 
-The onboard 32.768 kHz crystal drives the RTC. The time is **not** set from
-firmware compile time. To set it, power off the board and create a plain-text
-file called `SETTIME.TXT` in the root of the SD card, containing a decimal Unix
-timestamp in UTC followed by a newline. Put the card in the powered-off board,
-then power it up. The firmware deletes the file before setting the RTC so it
-won't silently reuse an old setting after a later reset. The timestamp is applied
-when the board reads the file, not when the file was created. For a simple bench
-test, prepare a timestamp for a known near-future time and apply power at that
-time; startup introduces a small additional delay. Verify the result against a
-trusted clock. This is not yet a precise clock-synchronization interface.
+The onboard 32.768 kHz crystal drives the RTC. Each build embeds the computer's
+Unix time in UTC. On startup, if the backup domain has no recognized time or
+the RTC is earlier than the embedded time, the firmware sets the RTC forward to
+that build time. It leaves an RTC that is already later unchanged. USB status
+and each new log record identify whether this floor was applied (`BUILD`) or a
+time was explicitly set (`SET`).
 
-Without a valid clock setting, events are still logged with `UNSET,0,0` in the
-time columns. Resetting the MCU while its RTC backup domain stays powered should
-preserve the time, but this has **not** been verified on the board. Removing all
-power may erase the time. The board's backup-power wiring and a battery supply
-need separate verification; do not connect an 18650 directly to an unverified
-pin. Create a fresh `SETTIME.TXT` whenever the clock needs to be set or adjusted.
+**Build time is an estimate, not proof of the current time.** It is behind by
+the time taken to build, flash, and start. If the device loses all RTC power
+months later, it may restart at that same old build time; `BUILD` and the build
+timestamp in the log expose the fallback but cannot recover the lost time. An
+incorrect computer clock can also advance a good RTC too far, and the floor
+won't correct a clock that is already too far ahead. A recognized backup marker
+does not prove the clock ran continuously or is accurate. Check the time against
+a trusted clock at deployment and retrieval.
+
+To explicitly set a different time, power off the board and create a plain-text
+file called `SETTIME.TXT` in the root of the SD card, containing a decimal Unix
+timestamp in UTC followed by a newline. It must be at least the embedded build
+time, or the firmware reports a time-file error. Put the card in the powered-off
+board, then power it up. The firmware deletes the file before setting the RTC so
+it won't silently reuse an old setting after a later reset. The timestamp is
+applied when the board reads the file, not when the file was created. For a
+bench test, prepare a timestamp for a known near-future time and apply power at
+that time; startup introduces a small additional delay. Verify the result against
+a trusted clock. This is not yet a precise clock-synchronization interface.
+
+Resetting the MCU while its RTC backup domain stays powered should preserve the
+time, but this has **not** been verified on the board. Removing all power may
+erase the time. The published v1.1 schematic shows the MCU's VBAT pin connected
+to a decoupling capacitor, with no backup cell or VBAT header connection shown.
+The MCU supports a backup supply, but using one on this board needs hardware
+design and verification. Its VBAT operating range is 1.8–3.6 V; do not connect
+a fully charged 18650 directly to VBAT or to the 3.3 V rail. Verify all supply,
+switchover, and reverse-current limits in the [WCH datasheet](https://datasheet.lcsc.com/lcsc/2204251630_WCH-Jiangsu-Qin-Heng-CH32V203C8T6_C3001172.pdf)
+before designing a backup supply.
 
 ## Read the results
 
-Each accepted closure appends one line with the original Rainus's first four
-columns, without temperature or humidity:
+Each accepted closure appends one line. The first four columns match the
+earlier CH32 prototype; two new columns identify the time source and build
+floor. Temperature and humidity are not recorded:
 
 ```text
-BENCH,2026-11-09T03:00:00,1794193200,847508400
+BENCH,2026-11-09T03:00:00,1794193200,847508400,BUILD,1794193200
 ```
 
 The fields are device ID, UTC timestamp, Unix seconds, and seconds since
-2000-01-01 UTC. The timestamp is captured at the start of the final closure
-candidate, before the 20 ms confirmation. Two quick blue LED flashes follow a
-successful write. For an unset clock, a line instead looks like
-`BENCH,UNSET,0,0`.
+2000-01-01 UTC, time source (`BUILD` or `SET`), and the embedded build time as
+Unix seconds. `BUILD` means the clock was last initialized or advanced to a
+build-time floor; it does **not** certify that the time is accurate. `SET`
+means an explicit time file was applied; it does not guarantee accuracy either.
+Old records from previous firmware have four columns, so existing files can
+contain both formats. The old analysis script expects temperature and humidity
+in columns five and six and must be updated before analyzing the new format.
+The event timestamp is captured at the start of the final closure candidate,
+before the 20 ms confirmation. Two quick blue LED flashes follow a successful
+write.
 
 ## USB diagnostics
 
@@ -188,10 +229,11 @@ setting is conventional for USB CDC, not a physical UART baud rate. Messages
 may be missed when the serial monitor is not open. To exit `screen`, press
 Control-A, then K, and confirm. Close the monitor before trying to flash again.
 
-Example: `err=0 rtc=99 fat=0 sd=99/0 logs=2`. Here `err=0` means no fatal
+Example: `err=0 rtc=99 fat=0 sd=99/0 logs=2 time=BUILD`. Here `err=0` means no fatal
 error, `rtc=99` means RTC initialization completed, `fat=0` means the card's
 filesystem mounted, and `sd=99/0` means SD initialization completed. `logs`
-is the number of events successfully written since the current boot. If an
+is the number of events successfully written since the current boot, and `time`
+is the clock source described above. If an
 error occurs, `err` matches the LED pulse count in the table below. For RTC errors, `rtc`
 identifies the stage: 1 clock-source check, 2 crystal startup, 3 initial
 synchronization, 4 entering configuration, 5 prescaler write, and 6 syncing an
