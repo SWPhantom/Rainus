@@ -1,0 +1,9 @@
+/rainus.bin
+/rainus.elf
+/rainus.hex
+/rainus.lst
+/rainus.map
+/rainus_ext.bin
+/rainus.generated.ld
+/tests/event_test
+/tests/fatfs_test
