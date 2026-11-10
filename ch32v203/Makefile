@@ -4,8 +4,12 @@ TARGET_MCU_PACKAGE := CH32V203C8T6
 CH32FUN_ROOT ?= ../../ch32fun
 HOST_CC ?= cc
 BUILD_UNIX_TIME ?= $(shell date -u +%s)
-ADDITIONAL_C_FILES := sd_spi.c rtc.c event.c time_policy.c chip_id.c fatfs/ff.c $(CH32FUN_ROOT)/extralibs/usbd.c
-EXTRA_CFLAGS += -Ifatfs -DRAINUS_BUILD_UNIX_TIME=$(BUILD_UNIX_TIME)
+DEBUG_USB ?= 0
+ADDITIONAL_C_FILES := sd_spi.c rtc.c event.c chip_id.c fatfs/ff.c
+ifeq ($(DEBUG_USB),1)
+ADDITIONAL_C_FILES += $(CH32FUN_ROOT)/extralibs/usbd.c
+endif
+EXTRA_CFLAGS += -Ifatfs -DRAINUS_BUILD_UNIX_TIME=$(BUILD_UNIX_TIME) -DRAINUS_DEBUG_USB=$(DEBUG_USB)
 
 # Keep linker-script generation and all build products in this directory.
 override GENERATED_LD_FILE := $(CURDIR)/rainus.generated.ld
@@ -17,8 +21,6 @@ include $(CH32FUN_ROOT)/ch32fun/ch32fun.mk
 test:
 	$(HOST_CC) -std=c11 -Wall -Wextra -Werror event.c tests/event_test.c -o tests/event_test
 	./tests/event_test
-	$(HOST_CC) -std=c11 -Wall -Wextra -Werror time_policy.c tests/time_policy_test.c -o tests/time_policy_test
-	./tests/time_policy_test
 	$(HOST_CC) -std=c11 -Wall -Wextra -Werror chip_id.c tests/chip_id_test.c -o tests/chip_id_test
 	./tests/chip_id_test
 	$(HOST_CC) -std=c11 -Wall -Wextra -Ifatfs fatfs/ff.c tests/fatfs_test.c -o tests/fatfs_test

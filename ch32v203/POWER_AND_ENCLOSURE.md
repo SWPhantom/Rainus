@@ -2,8 +2,9 @@
 
 These are design and test notes, not a field-ready power design. Numbers from a
 chip or battery datasheet are not a measurement of the complete logger. The
-current bench firmware keeps the MCU and USB logic awake and leaves the SD card
-powered; it is not a realistic low-power battery-life baseline.
+default field firmware requests STOP mode between events, but this has not yet
+been verified by current measurement. It leaves the SD card powered. The optional
+USB diagnostic build keeps the MCU and USB awake.
 
 ## Board power and SD
 
@@ -51,17 +52,16 @@ control of power sequencing and signal backfeed.
    so PPK2 is the only source. Recheck polarity before turning PPK2 output on.
    This measures the whole board at the 5 V input, including the regulator,
    card and power indicator circuitry. USB serial will not be connected.
-2. With the existing firmware, record startup, several minutes without
-   closures, and at least 20 individual closures (including their complete
-   write and LED flash). Repeat with different cards. Record mean current,
-   voltage, peak, and write duration; integrate the *extra* current above idle
-   over each event to estimate event charge. Don't infer card-only current
-   from this measurement.
-3. Build a separate sleep/wake prototype and repeat. Also measure card absent
-   and multiple card types where the test firmware can reach comparable states;
-   the existing firmware enters an LED error loop without a card, so its
-   no-card current is not comparable to normal idle. Measure current after the
-   card has settled for minutes, not only immediately after a write.
+2. With the field firmware, record startup, several minutes without closures,
+   and at least 20 individual closures (including both batch writes and LED
+   flashes). Repeat with different cards. Record mean current, voltage, peak,
+   and write duration; integrate the *extra* current above idle across a full
+   batch to estimate charge per event. Don't infer card-only current from this
+   measurement.
+3. Compare multiple card types and measure after each card has settled for
+   minutes, not only immediately after a write. The firmware enters an LED
+   error loop without a card, so its no-card current is not comparable to
+   normal idle.
 4. Compare the known number of closures with the SD file, including closures
    during writes, then repeat at the highest expected site event rate. Record
    supply voltage at the board during writes as well; the PPK2 current trace
@@ -71,7 +71,7 @@ Use the [PPK2 source-meter instructions](https://docs.nordicsemi.com/r/bundle/ug
 and its current and accuracy ranges. The simple average-current approximation
 is `I_average = I_idle + events_per_day * Q_event / 86400`, where `Q_event` is
 the extra microcoulombs per event and currents are in microamps. Use measured
-event frequencies and current profiles, and measure after sleep is implemented.
+event frequencies and current profiles, and verify the intended STOP state by measuring it.
 For battery choices at a different voltage, use energy (integral of V times I),
 including converter efficiency and quiescent draw; do not compare 5 V input mAh
 directly to battery mAh.
@@ -98,7 +98,7 @@ part of a two-year coin-cell budget when powered through this path.
 At one closure every five seconds continuously, the logger would receive 17,280
 events/day and about 12.6 million events in two 365-day years. That's a stress
 case, not an assumption that real sites run at that rate continuously. The
-current approximately 84-byte CSV records would occupy about 1.06 GB before
+current approximately 37-byte CSV records would occupy about 467 MB before
 filesystem overhead. The 24-character chip ID is included in that estimate.
 
 At the **battery terminals**, an ideal 200 mAh cell supplies an average of only
@@ -112,31 +112,22 @@ not currents on opposite sides of a voltage converter.
 
 ## Storage versus buffering
 
-Appending and closing after every event reduces the number of recent events held
-only in volatile memory, but costs card initialization and filesystem writes.
-Batching can save energy; it can also lose the entire unflushed batch on dead
-battery/reset and SD/FAT updates can still be damaged during a power cut. During
-an SD write, this prototype polls no input and can miss events. Measure event
-energy and card idle current before choosing a batch size. Any future buffering
-design should define its loss window, maximum event rate, flush conditions,
-power-fail behavior, error reporting, and capture while a write is in progress.
-FRAM or another nonvolatile store is an alternative to investigate, not an
-implemented part of this prototype.
+The firmware batches 10 event timestamps in RAM, while an interrupt-driven
+queue holds up to 31 additional events during an SD write. Between successful
+commits, a power loss can lose up to nine buffered events. During a write, it
+can lose the current batch or corrupt earlier FAT data as well. An unfinished
+batch remains in RAM indefinitely during a dry period. A safe service flush and
+low-battery handling are not implemented. A queue overflow stops the logger
+with a visible error, but may already have lost events. Test capture under real
+write delays and realistic bounce before relying on it.
 
-The present code opens the same file in append mode and closes it for every
-event. The bundled FatFs implementation walks the file's cluster chain to find
-the end on open, so append latency and reads can grow as the log gets larger.
-Test a large, representative file and evaluate bounded-size log files along with
-write batching and a safe recovery strategy before a long deployment.
-
-A RAM batch of 10 records normally leaves 0–9 pending *between successful
-commits*. A sudden power loss during the tenth record's write can also lose that
-batch or affect previously stored data due to SD/FAT metadata writes. Slow
-sites can leave the partial batch in RAM for a long time, so a time-based flush
-and a controlled service/low-battery flush are useful additions. Input capture
-while writing is a separate requirement: an interrupt-driven event queue should
-record closures while the foreground code is busy, with an explicit policy for
-debounce, queue overflow, and card failures.
+Batching may save energy, but the actual card idle current and event energy
+still need measuring. FRAM or another nonvolatile store remains an option for
+reducing the loss window. The firmware opens the same file in append mode once
+per batch. The bundled FatFs implementation walks the file's cluster chain to
+find the end on open, so append latency and reads can grow as the log gets
+larger. Test a large representative file and evaluate bounded-size files and a
+safe recovery strategy before a long deployment.
 
 ## Oil and water
 

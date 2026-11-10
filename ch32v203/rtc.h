@@ -1,10 +1,12 @@
 #ifndef RAINUS_RTC_H
 #define RAINUS_RTC_H
 #include <stdint.h>
-#include "time_policy.h"
-extern volatile unsigned rtc_debug_step;
-int clock_init(void);
-time_source_t clock_source(void);
+typedef enum {
+    CLOCK_OK, CLOCK_WRONG_SOURCE, CLOCK_CRYSTAL_TIMEOUT,
+    CLOCK_SYNC_TIMEOUT, CLOCK_WRITE_TIMEOUT
+} clock_result_t;
+clock_result_t clock_init(uint32_t build_time);
 uint32_t clock_seconds(void);
-int clock_set(uint32_t seconds, time_source_t source);
+// 32768 ticks per second, used only for debouncing switch edges.
+int clock_ticks(uint64_t *ticks);
 #endif

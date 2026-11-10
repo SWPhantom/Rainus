@@ -1,34 +1,32 @@
-# Rainus CH32V203 bench prototype
+# Rainus CH32V203 prototype
 
-This is a **continuously running bench prototype** for the MuseLab
-nanoCH32V203 v1.1. A board has been flashed from macOS, and its switch input,
-LED, USB diagnostics, and SD log have been checked on the bench. The build,
-flashing, and serial workflow has also been tried on Linux. The firmware is not
-field-ready and does not yet implement sleep, automatic retries, event buffering
-during SD writes, or backup power. Use a spare SD card and do not rely on it for
-a deployment.
+This firmware is for the MuseLab nanoCH32V203 v1.1. It is an experimental
+logger: test the switch, timestamps, SD writes, sleep current and reliability
+before deployment. The default build uses a GPIO interrupt and STOP mode;
+the optional USB debug build stays awake. STOP mode and long-term reliability
+still need verification on the actual board and card.
 
-The v1.1 board schematic assigns the onboard microSD socket to SPI1: PA3 is
-chip select, PA5 clock, PA6 MISO, and PA7 MOSI. The external input uses PA0.
-The board's PA15 LED indicates a successfully written event or an error.
+The onboard microSD socket uses SPI1: PA3 is chip select, PA5 clock, PA6 MISO,
+and PA7 MOSI. PA0 is the sensor input and the blue LED is on PA15.
 [Board maker's schematic and documentation](https://github.com/wuxx/nanoCH32V203).
 
 ## Connect and prepare
 
-1. With power disconnected, connect a **voltage-free** reed switch between
-   the board's PA0 and GND pins. The firmware enables PA0's internal pull-up.
-   Do not connect the original powered Rainus terminal circuit to this input.
-2. Insert a spare, FAT16- or FAT32-formatted microSD/SDHC card. The current SD
-   driver supports SD version 2 cards; exFAT is not supported. The program
-   creates/appends `RAINLOG.TXT`, and it may consume `SETTIME.TXT`.
-3. Connect USB power. The prototype draws continuous current; don't use its
-   current measurement to estimate the finished logger's battery life. The
-   current diagnostic firmware runs at 48 MHz to support USB serial.
+1. With power disconnected, connect a **voltage-free** reed switch between PA0
+   and GND. The internal pull-up holds PA0 high while the switch is open; a
+   closure pulls it low and triggers a falling-edge interrupt. Do not connect a
+   powered sensor circuit to the pin.
+2. Insert a spare FAT16- or FAT32-formatted microSD/SDHC card. The driver
+   supports SD version 2 cards; exFAT is not supported.
+3. Power the board. After initialization it waits for a switch closure. For
+   now a switch already held closed at startup is not guaranteed to be counted.
 
-The prototype accepts a closure that remains closed for 20 consecutive samples
-(nominally 20 ms), then requires a stable open interval before another event.
-This is a starting point, not a measured reed-switch specification. A closure
-already present at startup is counted once after the stable interval.
+Each accepted edge flashes the blue LED once for 100 ms. The handler accepts
+an edge immediately and ignores further falling edges for 100 ms; this is an
+initial debounce choice, not a measurement of the real gauge. It filters
+short bounce but can count bounce lasting longer than 100 ms, and merges real
+closures closer than 100 ms. A closure held continuously produces no new
+falling edges. Test with the actual gauge.
 
 ## Build and flash on macOS or Linux
 
@@ -70,12 +68,12 @@ If you already have a working ch32fun toolchain and `minichlink`, you can reuse
 them. Build the firmware and run the computer-side tests:
 
 ```sh
-make build
+make -B build
 make test
 make -C ../../ch32fun/minichlink minichlink
 ```
 
-`make build` creates `rainus.bin` without flashing. The last command builds
+`make -B build` creates `rainus.bin` without flashing. The last command builds
 the host-native USB programmer on the computer you're using; don't copy a macOS
 `minichlink` executable onto Linux. If ch32fun is elsewhere, pass its path to
 make, for example `make build CH32FUN_ROOT=/path/to/ch32fun`, and use that
@@ -112,7 +110,7 @@ checkout's `minichlink` path in the commands below.
    The first command should report a CH32V203. The second writes the firmware
    and requests a reboot. **A previously built binary retains its old build
    time**; use `./deploy.sh` for a fresh clock floor. Allow a few seconds for
-   USB to reconnect; press RST once if the application does not start.
+   the application to start; the field build does not provide a serial port.
 
 On Linux, `lsusb` can help identify the device in bootloader mode. The local
 `minichlink` source recognizes bootloader IDs `1a86:55e0` and `4348:55e0`.
@@ -131,148 +129,112 @@ and back in for the membership to take effect. Reconnect the board, put it back
 in bootloader mode, and retry. Group names and permission policies can differ
 by distribution.
 
-## Set and check the clock
+## How events, sleep and writes work
 
-The onboard 32.768 kHz crystal drives the RTC. Each build embeds the computer's
-Unix time in UTC. On startup, if the backup domain has no recognized time or
-the RTC is earlier than the embedded time, the firmware sets the RTC forward to
-that build time. It leaves an RTC that is already later unchanged. USB status
-and each new log record identify whether this floor was applied (`BUILD`) or a
-time was explicitly set (`SET`).
+In the field build, after initialization the CPU enters **STOP mode** whenever
+its event queue is empty. The RTC's 32.768 kHz crystal keeps time. A PA0 falling
+edge wakes the CPU and triggers the interrupt handler, which reads the RTC and
+queues the event. The main loop flashes the LED and adds the timestamp to a
+batch, then returns to STOP when there is no queued work. There is no periodic
+USB polling in this build. The SD card and board regulator remain powered: STOP
+mode does **not** mean that the RTC is the only component drawing power. A
+power-profiler measurement of the complete board is required to know the actual
+consumption and confirm that STOP mode is working as expected.
 
-**Build time is an estimate, not proof of the current time.** It is behind by
-the time taken to build, flash, and start. If the device loses all RTC power
-months later, it may restart at that same old build time; `BUILD` and the build
-timestamp in the log expose the fallback but cannot recover the lost time. An
-incorrect computer clock can also advance a good RTC too far, and the floor
-won't correct a clock that is already too far ahead. A recognized backup marker
-does not prove the clock ran continuously or is accurate. Check the time against
-a trusted clock at deployment and retrieval.
+The interrupt stays enabled during the LED flash and SD writes. The queue can
+hold 31 timestamps while the main loop is busy. If it overflows, at least one
+event was lost and the firmware stops with three repeating error flashes. This
+queue does not prove all hardware edges are captured: closely spaced edges can
+coalesce while an interrupt is pending, and switch bounce is filtered.
 
-To explicitly set a different time, power off the board and create a plain-text
-file called `SETTIME.TXT` in the root of the SD card, containing a decimal Unix
-timestamp in UTC followed by a newline. It must be at least the embedded build
-time, or the firmware reports a time-file error. Put the card in the powered-off
-board, then power it up. The firmware deletes the file before setting the RTC so
-it won't silently reuse an old setting after a later reset. The timestamp is
-applied when the board reads the file, not when the file was created. For a
-bench test, prepare a timestamp for a known near-future time and apply power at
-that time; startup introduces a small additional delay. Verify the result against
-a trusted clock. This is not yet a precise clock-synchronization interface.
+After **10 events**, the firmware appends the batch to `RAINLOG.TXT` and closes
+the file. Until then the events exist only in RAM. Power loss or reset can lose
+up to nine buffered events during idle, and an unfinished batch is not flushed
+automatically after a period of inactivity. A power failure during a write can
+lose the current batch and possibly corrupt earlier FAT filesystem data too.
+The LED confirms an event was accepted into RAM, **not** that it was saved to
+the SD card. No safe power-off or manual flush exists yet.
 
-Resetting the MCU while its RTC backup domain stays powered should preserve the
-time, but this has **not** been verified on the board. Removing all power may
-erase the time. The published v1.1 schematic shows the MCU's VBAT pin connected
-to a decoupling capacitor, with no backup cell or VBAT header connection shown.
-The MCU supports a backup supply, but using one on this board needs hardware
-design and verification. Its VBAT operating range is 1.8–3.6 V; do not connect
-a fully charged 18650 directly to VBAT or to the 3.3 V rail. Verify all supply,
-switchover, and reverse-current limits in the [WCH datasheet](https://datasheet.lcsc.com/lcsc/2204251630_WCH-Jiangsu-Qin-Heng-CH32V203C8T6_C3001172.pdf)
-before designing a backup supply.
+## Clock and records
 
-## Read the results
+Each build embeds the host computer's current UTC Unix time. At startup the
+RTC is initialized or, if it is behind that build time, advanced to it; a clock
+already ahead is left alone. Build and flash take time, so this is approximate.
+A bad host clock can put it too far ahead. If all RTC power is lost months
+after flashing, the device can restart at the old build time and produce
+plausible-looking but incorrect timestamps. The simplified log does not mark
+that fallback. Verify the clock at deployment and retrieval, and plan for this
+failure before trusting data. The firmware no longer reads `SETTIME.TXT`.
 
-Each accepted closure appends one line. The first four columns match the
-earlier CH32 prototype; two new columns identify the time source and build
-floor. Temperature and humidity are not recorded:
+The MCU RTC's 32-bit counter is split across two 16-bit registers. The code
+checks that the high half didn't change during the read, because the low half
+wraps every 65,536 seconds (about 18.2 hours). This prevents a rare incorrect
+read during a two-year deployment. The Unix counter itself wraps in 2106.
+
+New records contain the factory chip ID and UTC Unix seconds:
 
 ```text
-00112233445566778899AABB,2026-11-09T03:00:00,1794193200,847508400,BUILD,1794193200
+CDAB207B0FBCFCE239E339E3,1794203471
 ```
 
-The first field is the chip's factory ID, represented by 24 hexadecimal
-characters, including leading zeroes. Bytes are in ascending address order
-from the CH32V203's three UID registers. It identifies the microcontroller,
-not the enclosure or gauge; keep a mapping when assembling or replacing units.
-Verify that IDs remain the same after reflashing and differ across the actual
-boards before relying on them. Earlier records use the literal ID `BENCH`.
+The 24 hexadecimal characters are the chip's fixed 12-byte ID, read directly
+from its UID registers; flashing from another computer does not assign the ID.
+They identify the microcontroller, not the box or gauge. Older versions used
+other columns; if you reuse an existing card, its file may contain mixed formats.
+Convert Unix seconds to a human-readable date during analysis.
 
-The remaining fields are UTC timestamp, Unix seconds, and seconds since
-2000-01-01 UTC, time source (`BUILD` or `SET`), and the embedded build time as
-Unix seconds. `BUILD` means the clock was last initialized or advanced to a
-build-time floor; it does **not** certify that the time is accurate. `SET`
-means an explicit time file was applied; it does not guarantee accuracy either.
-Old records from previous firmware have four columns, so existing files can
-contain both formats. The old analysis script expects temperature and humidity
-in columns five and six and must be updated before analyzing the new format.
-The event timestamp is captured at the start of the final closure candidate,
-before the 20 ms confirmation. Two quick blue LED flashes follow a successful
-write.
+The board schematic shows no separate backup battery on VBAT. Do not assume
+that the RTC will retain time when power is removed. The MCU's VBAT range is
+1.8–3.6 V; a charged 18650 must not be connected directly to VBAT or 3.3 V.
+See the [power and enclosure notes](POWER_AND_ENCLOSURE.md).
 
-## USB diagnostics
+## USB diagnostics (optional build)
 
-When the firmware is **running**, it provides USB CDC serial over USB1, the same
-connector used for flashing. It does not provide the serial console while the
-board is in bootloader mode. After flashing, wait for it to reboot or press RST
-without holding BOOT. Find the port, then open it in a serial monitor:
+The default field build has **no application USB serial port**, whether awake
+or asleep. The USB bootloader is separate and remains available using the
+BOOT/RST sequence. To build and flash the diagnostic version instead:
 
-- **macOS:** run `ls /dev/cu.*` and look for `/dev/cu.usbmodem...`. On the
-  tested Mac, the port was `/dev/cu.usbmodem0071`:
+```sh
+DEBUG_USB=1 ./deploy.sh
+```
 
-  ```sh
-  screen /dev/cu.usbmodem0071 115200
-  ```
+That version runs at 48 MHz, keeps USB serial available, and stays awake. The
+serial commands in this refactor still need a successful bench check. It
+uses the same interrupt, queue and batching logic, but is not representative of
+field power consumption or STOP-mode operation. Return to the field version by
+running `./deploy.sh` without `DEBUG_USB=1`.
 
-- **Linux:** run `ls -l /dev/serial/by-id/` or `ls -l /dev/ttyACM*` and look
-  for the Rainus USB serial device. The following is an example; the actual
-  number can differ:
+Open the USB1 serial port after the debug firmware starts. On macOS, find it
+with `ls /dev/cu.*` and open, for example, `screen /dev/cu.usbmodem0071 115200`.
+On Linux, look in `/dev/serial/by-id/` or `/dev/ttyACM*`, then open, for
+example, `screen /dev/ttyACM0 115200`. The device name varies. Linux users may
+need serial-port group access as described in the flashing instructions. Type
+`?`, `s`, or `i` for a line containing the chip ID, error code, saved count,
+current batch count, RTC error code, interrupt count, PA0 level and RTC Unix seconds. RTC error codes are
+listed by name in `clock_result_t` in `rtc.h` (zero means success). Exit `screen` with Control-A, then K,
+and close it before flashing. The serial port is absent in bootloader mode.
 
-  ```sh
-  screen /dev/ttyACM0 115200
-  ```
+## Errors and verification
 
-  If opening the port gives a permission error, check the group shown by
-  `ls -l /dev/ttyACM0` and your groups with `groups`. On many Debian/Ubuntu
-  systems the serial-port group is `dialout`; see the group-membership steps
-  above. Log out and back in after changing group membership. If no port appears,
-  check the USB1 cable, make sure the firmware is running rather than the
-  bootloader, and inspect `lsusb`; the current diagnostic firmware identifies
-  itself as `1209:d035`.
+A fatal error repeats groups of blue LED flashes:
 
-Replace the example port with the one shown on your computer. The board prints
-status about every two seconds; send `?` for another status line, or `i` to
-request the chip ID. The baud
-setting is conventional for USB CDC, not a physical UART baud rate. Messages
-may be missed when the serial monitor is not open. To exit `screen`, press
-Control-A, then K, and confirm. Close the monitor before trying to flash again.
-
-Example: `err=0 rtc=99 fat=0 sd=99/0 logs=2 time=BUILD`. Here `err=0` means no fatal
-error, `rtc=99` means RTC initialization completed, `fat=0` means the card's
-filesystem mounted, and `sd=99/0` means SD initialization completed. `logs`
-is the number of events successfully written since the current boot, and `time`
-is the clock source described above. If an
-error occurs, `err` matches the LED pulse count in the table below. For RTC errors, `rtc`
-identifies the stage: 1 clock-source check, 2 crystal startup, 3 initial
-synchronization, 4 entering configuration, 5 prescaler write, and 6 syncing an
-already-running clock. The `sd` pair gives the last initialization command and
-its response, for debugging rather than an end-user status code.
-
-If a fatal error occurs, the LED repeats a group of pulses followed by a pause:
-
-| Pulses | Error |
+| Flashes | Error |
 | --- | --- |
-| 1 | RTC oscillator or initialization |
+| 1 | RTC initialization or clock setup |
 | 2 | SD initialization or filesystem mount |
-| 3 | Invalid time file or failure applying it |
-| 4 | Log open, write, or close failure |
+| 3 | Event queue overflow; at least one event was lost |
+| 4 | SD file open, write or close failed |
 
-The logger stops accepting events on an error; fix the cause and reset it.
-Power off before removing the card. FAT writes can be corrupted by interruption,
-even though the file is closed after each event.
+The logger stops processing events on an error. A repeated error flash pattern
+itself consumes power. Power off before removing the card.
 
-## Important limits and next tests
+Before deployment, compare a known independent closure count with the logged
+count at realistic and rapid rates, including held closures, bounce, and events
+during a deliberately slow SD write. Verify timestamps across RTC rollovers,
+reset and total power loss. Test multiple cards, full and missing cards,
+unexpected power loss, and FAT recovery. Use the Nordic PPK2 to profile the
+whole board in STOP and while writing; no two-year lifetime claim is established.
 
-Input sampling stops while an SD write is in progress. A second
-closure in that interval can be missed; the current code does not count or
-report such losses. The first physical tests should use a known number of
-closures, including bounce, held closures, and two-second spacing, and compare
-the result with an independent counter. Confirm the LED, RTC startup and reset
-retention, time setting, FAT32 as well as FAT16 cards, and missing-card errors.
-Then implement event capture during writes and sleep/wake, and use the power
-profiler to measure the **whole board**, including card and regulator.
-See [power and enclosure notes](POWER_AND_ENCLOSURE.md) for a measurement plan
-and the current hardware constraints.
-
-The `fatfs` directory contains FatFs R0.15 w/patch2 as found in the local
-ESP-IDF checkout, with its copyright and redistribution notice retained in the
-source. The configuration in `ffconf.h` is specific to this prototype.
+The `fatfs` directory contains FatFs R0.15 w/patch2, with its copyright and
+redistribution notice retained in the source. Its configuration is specific
+to this prototype.

@@ -35,7 +35,7 @@ if [ "$build_epoch" -lt 1577836800 ] || [ "$build_epoch" -gt 4294967295 ]; then
 fi
 printf 'Build time (UTC): %s (Unix %s)\n' "$(date -u '+%Y-%m-%d %H:%M:%S UTC')" "$build_epoch"
 echo "Check that the computer clock is correct; compiling..."
-make build "CH32FUN_ROOT=$fun_root" "BUILD_UNIX_TIME=$build_epoch"
+make -B build "DEBUG_USB=${DEBUG_USB:-0}" "CH32FUN_ROOT=$fun_root" "BUILD_UNIX_TIME=$build_epoch"
 echo "Flashing Rainus firmware..."
 "$programmer" -C isp -w rainus.bin flash -b
-echo "Flash complete. The board should reboot; see README.md for USB serial."
+echo "Flash complete. The board should reboot; see README.md for field and USB debug modes."

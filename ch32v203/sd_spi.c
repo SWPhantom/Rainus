@@ -5,8 +5,6 @@
 
 static DSTATUS status = STA_NOINIT;
 static int block_addressing;
-volatile unsigned sd_debug_step;
-volatile unsigned sd_debug_response;
 
 static uint8_t transfer(uint8_t b)
 {
@@ -66,44 +64,36 @@ DSTATUS disk_initialize(BYTE drive)
     funPinMode(PA5, GPIO_CFGLR_OUT_10Mhz_AF_PP);
     funPinMode(PA6, GPIO_CFGLR_IN_FLOAT);
     funPinMode(PA7, GPIO_CFGLR_OUT_10Mhz_AF_PP);
-    // 48 MHz APB2 / 256 = 187.5 kHz, below SD's 400 kHz init limit.
+    // Keep initialization within the SD card's 100–400 kHz range.
+#if RAINUS_DEBUG_USB
+    const uint16_t init_speed = SPI_CTLR1_BR; // 48 MHz / 256
+#else
+    const uint16_t init_speed = SPI_CTLR1_BR_2; // 8 MHz / 32
+#endif
     SPI1->CTLR1 = SPI_CTLR1_MSTR | SPI_CTLR1_SSM | SPI_CTLR1_SSI |
-                  SPI_CTLR1_BR | SPI_CTLR1_SPE;
+                  init_speed | SPI_CTLR1_SPE;
     for (int i = 0; i < 10; ++i) transfer(0xff);
-    sd_debug_step = 0;
-    sd_debug_response = command(0, 0);
-    if (sd_debug_response != 1) goto done;
-    sd_debug_step = 8;
-    sd_debug_response = command(8, 0x1aa);
-    if (sd_debug_response != 1) goto done;
+    if (command(0, 0) != 1) goto done;
+    if (command(8, 0x1aa) != 1) goto done;
     uint8_t r7[4];
     for (int i = 0; i < 4; ++i) r7[i] = transfer(0xff);
-    if (r7[2] != 1 || r7[3] != 0xaa) { sd_debug_response = r7[3]; goto done; }
+    if (r7[2] != 1 || r7[3] != 0xaa) goto done;
     int initialized = 0;
     for (int i = 0; i < 1000; ++i) {
-        sd_debug_step = 55;
-        sd_debug_response = command(55, 0);
-        if (sd_debug_response > 1) break;
-        sd_debug_step = 41;
-        sd_debug_response = command(41, 0x40000000);
-        if (sd_debug_response == 0) { initialized = 1; break; }
+        if (command(55, 0) > 1) break;
+        if (command(41, 0x40000000) == 0) { initialized = 1; break; }
         Delay_Ms(1);
     }
     if (!initialized) goto done;
-    sd_debug_step = 58;
-    sd_debug_response = command(58, 0);
-    if (sd_debug_response != 0) goto done;
+    if (command(58, 0) != 0) goto done;
     uint8_t ocr = transfer(0xff);
     for (int i = 0; i < 3; ++i) transfer(0xff);
     block_addressing = !!(ocr & 0x40);
     if (!block_addressing) {
-        sd_debug_step = 16;
-        sd_debug_response = command(16, 512);
-        if (sd_debug_response != 0) goto done;
+        if (command(16, 512) != 0) goto done;
     }
     status = 0;
-    sd_debug_step = 99;
-    // 48 MHz / 32 = 1.5 MHz for data transfers.
+    // /32 = 250 kHz in field mode and 1.5 MHz in USB mode.
     SPI1->CTLR1 = SPI_CTLR1_MSTR | SPI_CTLR1_SSM | SPI_CTLR1_SSI |
                   SPI_CTLR1_BR_2 | SPI_CTLR1_SPE;
 done:
