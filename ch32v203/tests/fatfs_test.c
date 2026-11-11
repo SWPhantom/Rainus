@@ -1,6 +1,7 @@
 // Exercise the bundled filesystem against an in-memory FAT16 volume.
 #include "../fatfs/ff.h"
 #include "../fatfs/diskio.h"
+#include "../log.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -88,10 +89,48 @@ static void check_volume(void) {
     assert(f_close(&f) == FR_OK);
     assert(f_unlink("RAINLOG.TXT") == FR_OK);
     assert(f_open(&f, "RAINLOG.TXT", FA_READ) == FR_NO_FILE);
+    assert(f_mount(0, "", 0) == FR_OK);
+}
+
+static void check_log_format(void) {
+    FATFS fs;
+    FIL file;
+    UINT n;
+    char result[256] = {0};
+    const char *id = "CDAB207B0FBCFCE239E339E3";
+    const uint32_t first[] = {1794274153, 1794274155};
+    const uint32_t second[] = {1794274157};
+    const char *expected =
+        "chip_id,event_unix_utc,build_unix_utc\r\n"
+        "CDAB207B0FBCFCE239E339E3,1794274153,1794274141\r\n"
+        "CDAB207B0FBCFCE239E339E3,1794274155,1794274141\r\n"
+        "CDAB207B0FBCFCE239E339E3,1794274157,1794274200\r\n";
+    assert(f_mount(&fs, "", 1) == FR_OK);
+    assert(log_write_batch(id, first, 2, 1794274141));
+    assert(log_write_batch(id, second, 1, 1794274200));
+    assert(f_open(&file, "RAINLOG.TXT", FA_READ) == FR_OK);
+    assert(f_read(&file, result, sizeof result - 1, &n) == FR_OK);
+    assert(n == strlen(expected) && strcmp(result, expected) == 0);
+    assert(f_close(&file) == FR_OK);
+
+    // A pre-existing log is appended to, without inserting a header midway.
+    assert(f_unlink("RAINLOG.TXT") == FR_OK);
+    assert(f_open(&file, "RAINLOG.TXT", FA_CREATE_ALWAYS | FA_WRITE) == FR_OK);
+    assert(f_write(&file, "old-format\r\n", 12, &n) == FR_OK && n == 12);
+    assert(f_close(&file) == FR_OK);
+    assert(log_write_batch(id, second, 1, 1794274200));
+    assert(f_open(&file, "RAINLOG.TXT", FA_READ) == FR_OK);
+    memset(result, 0, sizeof result);
+    assert(f_read(&file, result, sizeof result - 1, &n) == FR_OK);
+    assert(strcmp(result, "old-format\r\n"
+                  "CDAB207B0FBCFCE239E339E3,1794274157,1794274200\r\n") == 0);
+    assert(f_close(&file) == FR_OK);
+    assert(f_unlink("RAINLOG.TXT") == FR_OK);
+    assert(f_mount(0, "", 0) == FR_OK);
 }
 
 int main(void) {
-    make_fat16(); check_volume();
-    make_fat32(); check_volume();
-    puts("FAT16/FAT32 append, remount, read, and unlink tests passed");
+    make_fat16(); check_volume(); check_log_format();
+    make_fat32(); check_volume(); check_log_format();
+    puts("FAT16/FAT32 filesystem and log format tests passed");
 }

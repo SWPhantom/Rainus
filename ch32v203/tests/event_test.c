@@ -9,5 +9,7 @@ int main(void)
     assert(!debounce_edge(&d, 32760 + 3276));
     assert(debounce_edge(&d, 32760 + 3277));
     assert(debounce_edge(&d, 32760 + 5 * 32768));
+    assert(debounce_edge(&d, 32760 + 5 * 32768 - 1) == -1);
+    assert(!debounce_edge(&d, 32760 + 5 * 32768 + 1));
     puts("edge debounce tests passed");
 }

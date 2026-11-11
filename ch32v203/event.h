@@ -5,6 +5,6 @@ typedef struct {
     uint64_t last_tick;
     int seen;
 } debounce_t;
-// Accept the first falling edge, then ignore edges for 100 ms.
+// Return 1 to accept, 0 to debounce, or -1 if the clock moved backwards.
 int debounce_edge(debounce_t *state, uint64_t tick);
 #endif

@@ -59,9 +59,9 @@ control of power sequencing and signal backfeed.
    batch to estimate charge per event. Don't infer card-only current from this
    measurement.
 3. Compare multiple card types and measure after each card has settled for
-   minutes, not only immediately after a write. The firmware enters an LED
-   error loop without a card, so its no-card current is not comparable to
-   normal idle.
+   minutes, not only immediately after a write. The firmware enters an error
+   loop without a card, even when LED flashes are disabled, so its no-card
+   current is not comparable to normal idle.
 4. Compare the known number of closures with the SD file, including closures
    during writes, then repeat at the highest expected site event rate. Record
    supply voltage at the board during writes as well; the PPK2 current trace
@@ -98,7 +98,7 @@ part of a two-year coin-cell budget when powered through this path.
 At one closure every five seconds continuously, the logger would receive 17,280
 events/day and about 12.6 million events in two 365-day years. That's a stress
 case, not an assumption that real sites run at that rate continuously. The
-current approximately 37-byte CSV records would occupy about 467 MB before
+current approximately 48-byte CSV records would occupy about 605 MB before
 filesystem overhead. The 24-character chip ID is included in that estimate.
 
 At the **battery terminals**, an ideal 200 mAh cell supplies an average of only
@@ -118,8 +118,9 @@ commits, a power loss can lose up to nine buffered events. During a write, it
 can lose the current batch or corrupt earlier FAT data as well. An unfinished
 batch remains in RAM indefinitely during a dry period. A safe service flush and
 low-battery handling are not implemented. A queue overflow stops the logger
-with a visible error, but may already have lost events. Test capture under real
-write delays and realistic bounce before relying on it.
+with an error (visible only when LED flashes are enabled), but may already have
+lost events. Test capture under real write delays and realistic bounce before
+relying on it.
 
 Batching may save energy, but the actual card idle current and event energy
 still need measuring. FRAM or another nonvolatile store remains an option for

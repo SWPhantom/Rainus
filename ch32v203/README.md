@@ -21,12 +21,25 @@ and PA7 MOSI. PA0 is the sensor input and the blue LED is on PA15.
 3. Power the board. After initialization it waits for a switch closure. For
    now a switch already held closed at startup is not guaranteed to be counted.
 
-Each accepted edge flashes the blue LED once for 100 ms. The handler accepts
-an edge immediately and ignores further falling edges for 100 ms; this is an
+When LED flashes are enabled, each accepted edge flashes the blue LED once for
+100 ms. The handler accepts an edge immediately and ignores further falling
+edges for 100 ms; this is an
 initial debounce choice, not a measurement of the real gauge. It filters
 short bounce but can count bounce lasting longer than 100 ms, and merges real
 closures closer than 100 ms. A closure held continuously produces no new
 falling edges. Test with the actual gauge.
+
+If the timestamp used for debouncing goes backwards while the logger is
+running, it stops with an RTC error instead of treating the jump as a new
+closure. That check cannot detect an RTC reset between boots.
+
+To turn off all firmware-controlled flashes, set `RAINUS_LED_ENABLED` to `0`
+near the top of `rainus.c`, then rebuild and flash. Set it to `1` to restore
+them. This controls the PA15 blue LED; it cannot turn off any power indicator
+that is wired directly to a power rail. With flashes disabled, fatal errors
+still stop the logger but have no visible indication. The awake USB debug build
+can report them over serial. The fatal-error loop stays awake even with flashes
+disabled, so its power draw is not representative of normal STOP-mode idle.
 
 ## Build and flash on macOS or Linux
 
@@ -134,8 +147,8 @@ by distribution.
 In the field build, after initialization the CPU enters **STOP mode** whenever
 its event queue is empty. The RTC's 32.768 kHz crystal keeps time. A PA0 falling
 edge wakes the CPU and triggers the interrupt handler, which reads the RTC and
-queues the event. The main loop flashes the LED and adds the timestamp to a
-batch, then returns to STOP when there is no queued work. There is no periodic
+queues the event. The main loop optionally flashes the LED and adds the
+timestamp to a batch, then returns to STOP when there is no queued work. There is no periodic
 USB polling in this build. The SD card and board regulator remain powered: STOP
 mode does **not** mean that the RTC is the only component drawing power. A
 power-profiler measurement of the complete board is required to know the actual
@@ -143,8 +156,8 @@ consumption and confirm that STOP mode is working as expected.
 
 The interrupt stays enabled during the LED flash and SD writes. The queue can
 hold 31 timestamps while the main loop is busy. If it overflows, at least one
-event was lost and the firmware stops with three repeating error flashes. This
-queue does not prove all hardware edges are captured: closely spaced edges can
+event was lost and the firmware stops with four repeating error flashes (when
+flashes are enabled). This queue does not prove all hardware edges are captured: closely spaced edges can
 coalesce while an interrupt is pending, and switch bounce is filtered.
 
 After **10 events**, the firmware appends the batch to `RAINLOG.TXT` and closes
@@ -152,36 +165,57 @@ the file. Until then the events exist only in RAM. Power loss or reset can lose
 up to nine buffered events during idle, and an unfinished batch is not flushed
 automatically after a period of inactivity. A power failure during a write can
 lose the current batch and possibly corrupt earlier FAT filesystem data too.
-The LED confirms an event was accepted into RAM, **not** that it was saved to
-the SD card. No safe power-off or manual flush exists yet.
+When enabled, the LED confirms an event was accepted into RAM, **not** that it
+was saved to the SD card. No safe power-off or manual flush exists yet.
 
 ## Clock and records
 
 Each build embeds the host computer's current UTC Unix time. At startup the
-RTC is initialized or, if it is behind that build time, advanced to it; a clock
-already ahead is left alone. Build and flash take time, so this is approximate.
+RTC is initialized and set to the build time if newly started, or advanced to
+that time if it is behind; a running clock already ahead is left alone. If RTC
+initialization fails, the logger stops before enabling switch capture. A switch
+closure while the RTC is starting is not recorded. Build and flash take time,
+so this is approximate.
 A bad host clock can put it too far ahead. If all RTC power is lost months
 after flashing, the device can restart at the old build time and produce
-plausible-looking but incorrect timestamps. The simplified log does not mark
-that fallback. Verify the clock at deployment and retrieval, and plan for this
-failure before trusting data. The firmware no longer reads `SETTIME.TXT`.
+plausible-looking but incorrect timestamps. The log includes the build time,
+but does not indicate whether a fallback actually occurred. Verify the clock
+at deployment and retrieval, and plan for this failure before trusting data.
+The firmware no longer reads `SETTIME.TXT`.
 
 The MCU RTC's 32-bit counter is split across two 16-bit registers. The code
 checks that the high half didn't change during the read, because the low half
 wraps every 65,536 seconds (about 18.2 hours). This prevents a rare incorrect
 read during a two-year deployment. The Unix counter itself wraps in 2106.
 
-New records contain the factory chip ID and UTC Unix seconds:
+New or empty log files get a header. Each record contains the factory chip ID,
+the event time and the firmware build time, both in Unix seconds (UTC):
 
 ```text
-CDAB207B0FBCFCE239E339E3,1794203471
+chip_id,event_unix_utc,build_unix_utc
+CDAB207B0FBCFCE239E339E3,1794274153,1794274141
 ```
 
 The 24 hexadecimal characters are the chip's fixed 12-byte ID, read directly
 from its UID registers; flashing from another computer does not assign the ID.
-They identify the microcontroller, not the box or gauge. Older versions used
-other columns; if you reuse an existing card, its file may contain mixed formats.
-Convert Unix seconds to a human-readable date during analysis.
+They identify the microcontroller, not the box or gauge. The build time is the
+host clock when the firmware was compiled; it is not the deployment time and
+does not prove the RTC was initialized from that build. Convert Unix seconds to
+a human-readable date during analysis. For example, to inspect the sample
+event time on a computer:
+
+```sh
+# macOS
+date -u -r 1794274153
+# Linux
+date -u -d '@1794274153'
+```
+
+Older versions used other columns. Existing nonempty `RAINLOG.TXT` files are
+left intact and do not get a new header; appending to one will mix formats.
+Archive or rename the old file while the board is powered off to start a new,
+self-describing log. The header and events are written when the first batch of
+ten is saved, not at startup.
 
 The board schematic shows no separate backup battery on VBAT. Do not assume
 that the RTC will retain time when power is removed. The MCU's VBAT range is
@@ -220,10 +254,10 @@ A fatal error repeats groups of blue LED flashes:
 
 | Flashes | Error |
 | --- | --- |
-| 1 | RTC initialization or clock setup |
-| 2 | SD initialization or filesystem mount |
-| 3 | Event queue overflow; at least one event was lost |
-| 4 | SD file open, write or close failed |
+| 2 | RTC initialization or clock error |
+| 3 | SD initialization or filesystem mount |
+| 4 | Event queue overflow; at least one event was lost |
+| 5 | SD file open, write or close failed |
 
 The logger stops processing events on an error. A repeated error flash pattern
 itself consumes power. Power off before removing the card.

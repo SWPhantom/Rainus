@@ -75,7 +75,9 @@ clock_result_t clock_init(uint32_t build_time)
     RTC->PSCRH = 0;
     RTC->PSCRL = 32767;
     if (!write_end()) return CLOCK_WRITE_TIMEOUT;
-    if (clock_seconds() < build_time) {
+    // A newly started RTC cannot be assumed to contain a valid timestamp.
+    // Otherwise preserve a running clock unless it is earlier than the build.
+    if (newly_enabled || clock_seconds() < build_time) {
         if (!write_begin()) return CLOCK_WRITE_TIMEOUT;
         RTC->CNTH = build_time >> 16;
         RTC->CNTL = build_time & 0xffff;
