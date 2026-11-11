@@ -66,7 +66,12 @@ clock_result_t clock_init(uint32_t build_time)
         Delay_Ms(1);
     }
     int newly_enabled = !(RCC->BDCTLR & RCC_RTCEN);
-    if (newly_enabled) RCC->BDCTLR |= RCC_RTCSEL_LSE | RCC_RTCEN;
+    if (newly_enabled) {
+        // Select a clock source before enabling the RTC clock. The chip can
+        // ignore RTCEN when no source has been selected yet.
+        RCC->BDCTLR |= RCC_RTCSEL_LSE;
+        RCC->BDCTLR |= RCC_RTCEN;
+    }
     RTC->CTLRL &= ~RTC_CTLRL_RSF;
     if (!wait_rtc(RTC_CTLRL_RSF, 1000)) return CLOCK_SYNC_TIMEOUT;
     // These registers are write-only. Set the known 1 Hz prescaler even
