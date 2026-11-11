@@ -67,6 +67,51 @@ control of power sequencing and signal backfeed.
    supply voltage at the board during writes as well; the PPK2 current trace
    alone does not establish that a battery can hold voltage under the peaks.
 
+The separate `power_floor/` experiment enters MCU standby with the RTC, SD
+initialization, RAM retention and sensor wake disabled. It can be measured with
+and without a card, unlike the logger's no-card error loop. This is a board
+power-floor investigation, not a functional logger or a measurement of the
+normal initialized card's idle current. See the README for flashing, recovery,
+and the important RTC and card-state limitations.
+
+On November 10, 2026, a first PPK2 Source Meter test at 5 V measured about
+**32 µA without a card** and **1 mA with a Gigastone 32 GB microSD card** in
+this standby experiment. A separate temporary diagnostic initialized the same
+card before entering the same standby configuration and measured **1.14 mA**;
+its two startup flashes confirmed initialization completed. In both tests the
+RTC was off and the GPIOs were set to analog input before standby. These are
+whole-board measurements; card state, pin state, and measurement variation
+must be considered before attributing the difference to the card alone. The
+initialized-card test does not reproduce the logger's STOP-mode pin states.
+With the same initialized-card diagnostic changed from standby to STOP with
+the normal regulator, the user measured approximately **1.10 mA**. That
+diagnostic still had the RTC and sensor wake disabled and GPIOs set to analog
+input, so it is not the normal logger. The similar standby and STOP readings
+do not by themselves identify the MCU's current or the card's independent
+current, and do not explain the earlier approximately 1.96 mA logger reading.
+A further STOP diagnostic kept the initialized SD card's SPI pins, PA0's
+pull-up and the LED pin configured like the logger instead of setting GPIOs to
+analog input; the measured whole-board current was approximately **1.09 mA**.
+The RTC and sensor interrupts remained off. This suggests the tested pin
+configuration alone did not account for the earlier higher logger reading.
+The normal field logger, reflashed with the cold-start RTC fix and the same
+card, subsequently measured approximately **1.95 mA** at idle; its LED stayed
+off. Unlike the diagnostics, it enables the RTC and switch wake, mounts the
+filesystem, and uses WFE to request STOP. At that point, the tests had not yet
+isolated which difference accounted for the roughly 0.86 mA gap.
+A subsequent temporary build of the logger changed only its sleep instruction
+from WFE to WFI; under the same setup it measured approximately **1.07 mA**
+at idle, with no repeating LED errors. This implicates the WFE path in the
+extra draw, but the WFI build did not wake for a switch closure. A separate
+WFE test consumed a software event before sleeping and checked for a pending
+switch edge; it measured approximately **1.05 mA** idle, flashed on closures,
+and returned to that level afterward. After this WFE sequence was added to the
+normal logger and flashed, the user reported approximately **1.1 mA** idle
+with the same card. It has not yet been subjected to a long-duration or
+controlled rapid-event loss test. A roughly 28 mA peak was also observed
+during the diagnostic, but its duration and relationship to an SD write were
+not independently verified.
+
 Use the [PPK2 source-meter instructions](https://docs.nordicsemi.com/r/bundle/ug_ppk2/page/ug/ppk/measure_current_source_meter.html)
 and its current and accuracy ranges. The simple average-current approximation
 is `I_average = I_idle + events_per_day * Q_event / 86400`, where `Q_event` is

@@ -29,3 +29,4 @@ test:
 # cv_clean comes from ch32fun and removes the firmware build products.
 clean: cv_clean
 	$(RM) $(call fixpath,ch32fun.o) $(call fixpath,tests/event_test) $(call fixpath,tests/chip_id_test) $(call fixpath,tests/fatfs_test) $(call fixpath,tests/time_policy_test)
+	$(MAKE) -C power_floor clean CH32FUN_ROOT="$(abspath $(CH32FUN_ROOT))"

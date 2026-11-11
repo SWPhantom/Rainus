@@ -552,3 +552,74 @@ Cleaned up code. No more web/timer stuff. Hopefully it's a LITTLE cleaner...
 2023-08-29
 Another check of the battery we've been using in the test unit:
 3.89v
+
+
+2026-11-09 and 2026-11-10 — CH32V203 prototype and power investigation
+
+The 20 ESP32-based loggers deployed in Thailand mostly failed within a year;
+moisture and corrosion were common, and some units had unexplained failures or
+unreliable readings. We started a new prototype on the nanoCH32V203 v1.1,
+which has an RTC and microSD socket. The goal is a low-cost, maintainable
+logger that records rain-gauge reed-switch closures for up to two years.
+
+The board can now be built and flashed on macOS and Linux. A PA0-to-GND
+closure produces an event record; the user verified records on the card. The
+CSV columns are `chip_id,event_unix_utc,build_unix_utc`. The ID comes from
+the chip's factory identifier, not the computer doing the flashing. The RTC
+is initialized from the build time if needed. After a complete loss of power,
+it may restart at the old build time, so timestamps can be wrong until reset
+with a fresh build; the build time is a reference, not a trusted current time.
+
+The current field firmware uses STOP and wakes on a PA0 falling edge. An
+interrupt captures events even while an SD write is in progress, with a finite
+queue. Ten events are buffered in RAM before writing the card. Power loss can
+discard a partial batch, and an interrupted SD write can damage more data.
+The blue LED can be disabled at compile time; with it enabled, repeating
+groups of 2, 3, 4, or 5 flashes indicate RTC, SD mount, queue overflow, or SD
+write errors respectively. The debug USB build stays awake and is not the
+field power measurement.
+
+On cold power-up, the RTC sometimes failed to synchronize (the temporary
+diagnostic reported eight flashes), although pressing reset fixed it. Longer
+RTC synchronization waits did not fix it. Selecting the LSE source and
+enabling the RTC in separate register writes fixed the observed cold starts;
+several cold starts and the normal firmware were checked successfully. This
+is consistent with the documented ordering requirement, though a few bench
+trials do not establish long-term reliability.
+
+With a Nordic PPK2 supplying 5 V to the board and a Gigastone 32 GB microSD
+card, we measured the following settled currents. These are approximate
+whole-board measurements, not individual chip or card specifications:
+
+| Test firmware and condition | Current at 5 V |
+| --- | ---: |
+| Minimal standby, no SD card, RTC off | 32 µA |
+| Same standby, card inserted but not initialized | ~1 mA |
+| Card initialized, standby, RTC off | 1.14 mA |
+| Card initialized, STOP, RTC off | 1.10 mA |
+| Same STOP test with logger-like GPIO configuration | 1.09 mA |
+| Earlier normal logger sleep sequence, card present | 1.95 mA |
+| WFI experiment, card present; did not wake on PA0 | 1.07 mA |
+| Revised WFE experiment, card present; PA0 wake worked | 1.05 mA |
+| Normal logger with revised WFE, card present; PA0 wake worked | ~1.1 mA |
+
+The WFE revision clears a pending event before sleeping and checks for an
+edge while entering sleep. It reduced measured idle current without losing
+the observed wake behavior; the exact cause of the earlier higher current
+is not proven. A roughly 28 mA peak was seen during activity, plausibly an SD
+write, but its duration and attribution were not measured. The card/no-card
+comparison strongly motivates testing cards and storage alternatives, but
+does not isolate card current from pin and initialization effects.
+
+Archived test sources and reconstruction instructions are in
+`ch32v203/experiments/2026-11-rtc-and-power/`. The stripped-down standby
+program is also kept in `ch32v203/power_floor/`. Several diagnostics cannot
+log events and deliberately stop the RTC; they are not field firmware. See
+`ch32v203/POWER_AND_ENCLOSURE.md` for the power and enclosure notes.
+
+Still to do: compare SD cards under the same conditions and measure energy per
+write; test exact event counts with the actual wired gauge, including events
+during writes and around sleep entry; test abrupt power loss and SD recovery;
+address clock setting after power loss; evaluate durable low-power storage,
+the complete battery/power path, and moisture protection. Two-year operation
+remains a target, not an established battery-life result.

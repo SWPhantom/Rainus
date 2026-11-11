@@ -21,6 +21,11 @@
 #define BATCH_SIZE 10
 #define QUEUE_SIZE 32 // Holds up to 31 edges while foreground code is busy.
 
+// Bits in the interrupt controller's system-control register.
+#define PFIC_SLEEP_DEEP  (1u << 2)
+#define PFIC_WFI_AS_WFE  (1u << 3)
+#define PFIC_SET_EVENT   (1u << 5)
+
 static FATFS filesystem;
 static char chip_id[CHIP_ID_TEXT_LEN + 1];
 static volatile uint32_t queue[QUEUE_SIZE];
@@ -166,11 +171,17 @@ int main(void)
         if (queue_head == queue_tail) {
 #if !RAINUS_DEBUG_USB
             PWR->CTLR &= ~(PWR_CTLR_PDDS | PWR_CTLR_LPDS);
-            // STOP, not standby: retain RAM. WFITOWFE makes WFI consume
-            // a pending EXTI event instead of relying on global IRQ state.
-            NVIC->SCTLR |= (1 << 2) | (1 << 3);
+            // Enter STOP with WFE. Set and consume a software event first so
+            // a stale event cannot make every sleep attempt return immediately.
+            NVIC->SCTLR |= PFIC_SLEEP_DEEP | PFIC_WFI_AS_WFE | PFIC_SET_EVENT;
+            NVIC->SCTLR &= ~PFIC_SET_EVENT;
             __asm__ volatile ("wfi" ::: "memory");
-            NVIC->SCTLR &= ~((1 << 2) | (1 << 3));
+            // An edge during the first WFE is still pending while interrupts
+            // are masked. Skip the second WFE so that edge gets serviced.
+            // An edge after this check wakes the second WFE directly.
+            if (!(EXTI->INTFR & EXTI_Line0))
+                __asm__ volatile ("wfi" ::: "memory");
+            NVIC->SCTLR &= ~(PFIC_SLEEP_DEEP | PFIC_WFI_AS_WFE);
 #endif
             __asm__ volatile ("" ::: "memory");
             __enable_irq();

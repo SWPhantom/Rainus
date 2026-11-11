@@ -96,6 +96,38 @@ Run `make clean` in `Rainus/ch32v203` to remove the generated firmware files,
 linker script and local test executables. It leaves source files and the
 separately built `minichlink` programmer intact.
 
+### Standby power-floor experiment
+
+`power_floor/` is a separate diagnostic firmware for measuring the board
+with the MCU in its lowest-power standby configuration. **It is not a logger:**
+it disables the RTC and external wake inputs, does not initialize the SD card,
+and does not record events. After one 100 ms startup flash it turns off the
+LED and enters standby. RST restarts the test; BOOT/RST still enters the USB
+bootloader. Time stops advancing while this test runs. Restore the normal
+firmware with `./deploy.sh` from `Rainus/ch32v203` and verify the RTC time
+before using the board as a logger.
+
+To build and flash the experiment from `Rainus/ch32v203`:
+
+```sh
+make -C power_floor build
+../../ch32fun/minichlink/minichlink -C isp -i
+../../ch32fun/minichlink/minichlink -C isp -w power_floor/power_floor.bin flash -b
+```
+
+Enter USB1 bootloader mode before the last two commands and verify that the
+programmer identifies the intended board. If ch32fun is elsewhere, pass
+`CH32FUN_ROOT=/absolute/path/to/ch32fun` to make and use that checkout's
+`minichlink` executable. As in the regular flashing instructions, disconnect
+the PPK2 output and other power sources before connecting USB to Rainus.
+
+With PPK2 Source Meter at 5 V connected to the board's verified 5V/GND pins,
+measure settled current first without an SD card, then with the card inserted.
+Power down before changing cards. These measure the complete board, not the MCU
+alone. The card-present experiment leaves the card uninitialized and MCU GPIOs
+high impedance: its current and pin states can differ from the normal logger,
+so subtracting the two readings does not isolate the logger's SD-idle current.
+
 ### Flash over USB
 
 1. Close any serial monitor connected to the board. Connect a data-capable
