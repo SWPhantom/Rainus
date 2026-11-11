@@ -17,7 +17,7 @@ override GENERATED_LD_FILE := $(CURDIR)/rainus.generated.ld
 .DEFAULT_GOAL := build
 include $(CH32FUN_ROOT)/ch32fun/ch32fun.mk
 
-.PHONY: test
+.PHONY: test clean cv_clean
 test:
 	$(HOST_CC) -std=c11 -Wall -Wextra -Werror event.c tests/event_test.c -o tests/event_test
 	./tests/event_test
@@ -25,3 +25,7 @@ test:
 	./tests/chip_id_test
 	$(HOST_CC) -std=c11 -Wall -Wextra -Ifatfs fatfs/ff.c log.c tests/fatfs_test.c -o tests/fatfs_test
 	./tests/fatfs_test
+
+# cv_clean comes from ch32fun and removes the firmware build products.
+clean: cv_clean
+	$(RM) $(call fixpath,ch32fun.o) $(call fixpath,tests/event_test) $(call fixpath,tests/chip_id_test) $(call fixpath,tests/fatfs_test) $(call fixpath,tests/time_policy_test)

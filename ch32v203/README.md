@@ -92,6 +92,10 @@ the host-native USB programmer on the computer you're using; don't copy a macOS
 make, for example `make build CH32FUN_ROOT=/path/to/ch32fun`, and use that
 checkout's `minichlink` path in the commands below.
 
+Run `make clean` in `Rainus/ch32v203` to remove the generated firmware files,
+linker script and local test executables. It leaves source files and the
+separately built `minichlink` programmer intact.
+
 ### Flash over USB
 
 1. Close any serial monitor connected to the board. Connect a data-capable
