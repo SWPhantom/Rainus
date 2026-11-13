@@ -42,7 +42,14 @@ static uint8_t command(uint8_t cmd, uint32_t arg)
 {
     uint8_t response;
     deselect();
-    if (!select_card()) return 0xff;
+    if (cmd == 0) {
+        // CMD0 puts a newly powered card into SPI mode. Its data output may
+        // not report SPI-ready before that command has been sent.
+        funDigitalWrite(PA3, FUN_LOW);
+        transfer(0xff);
+    } else if (!select_card()) {
+        return 0xff;
+    }
     transfer(0x40 | cmd);
     transfer(arg >> 24); transfer(arg >> 16); transfer(arg >> 8); transfer(arg);
     transfer(cmd == 0 ? 0x95 : cmd == 8 ? 0x87 : 0xff);
@@ -72,8 +79,16 @@ DSTATUS disk_initialize(BYTE drive)
 #endif
     SPI1->CTLR1 = SPI_CTLR1_MSTR | SPI_CTLR1_SSM | SPI_CTLR1_SSI |
                   init_speed | SPI_CTLR1_SPE;
+    // Allow the card supply to settle before the initial 80 clock pulses.
+    Delay_Ms(100);
     for (int i = 0; i < 10; ++i) transfer(0xff);
-    if (command(0, 0) != 1) goto done;
+    // Some cards need more than one reset command on a cold power-up.
+    int reset_ok = 0;
+    for (int i = 0; i < 100; ++i) {
+        if (command(0, 0) == 1) { reset_ok = 1; break; }
+        Delay_Ms(10);
+    }
+    if (!reset_ok) goto done;
     if (command(8, 0x1aa) != 1) goto done;
     uint8_t r7[4];
     for (int i = 0; i < 4; ++i) r7[i] = transfer(0xff);

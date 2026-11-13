@@ -623,3 +623,29 @@ during writes and around sleep entry; test abrupt power loss and SD recovery;
 address clock setting after power loss; evaluate durable low-power storage,
 the complete battery/power path, and moisture protection. Two-year operation
 remains a target, not an established battery-life result.
+
+2026-11-12 — SD card measurements and startup investigation
+
+The Gigastone card's observed write interval was approximately 200 ms with
+about 2.5 mC of total measured charge. A separate, unbranded 4 GB card gave
+approximately 190 µA whole-board idle current. The role of card capacity,
+controller, firmware, and board interaction is not established.
+
+A 64 GB SanDisk Extreme caused the normal logger to repeat the three-flash SD
+mount error, despite the Mac reporting an MBR partition map, 512-byte device
+blocks, and a partition labeled FAT32. Read-only diagnostic firmware located
+the first failure before CMD0: the driver waited for an SPI-ready indication
+before sending the command that switches the card into SPI mode. Bypassing that
+check made it mount after RESET but initially still fail after a cold start.
+A 100 ms delay alone did not fix the original pre-command ready check; adding
+that delay to the bypass still failed cold. Retrying CMD0 after the bypass and
+delay mounted the card in a cold-start test and after RESET. The exact reason
+the first CMD0 response was unexpected is not known.
+
+The normal driver now includes that startup delay, skips the pre-CMD0 ready
+check, and retries CMD0 for a bounded period. Existing host tests pass. With
+the normal logger flashed, the user reported no startup error flashes and
+confirmed that event logs appeared on the SanDisk card. Repeated cold starts,
+previously working cards, and longer logging runs remain to be verified before
+deployment. The read-only diagnostics and their blink codes are archived in
+`ch32v203/experiments/2026-11-sd-mount/`.
