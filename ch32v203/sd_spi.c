@@ -50,6 +50,8 @@ static uint8_t command(uint8_t cmd, uint32_t arg)
     } else if (!select_card()) {
         return 0xff;
     }
+    // SPI command: command number, four argument bytes (most significant
+    // first), then CRC. CMD0 and CMD8 need their valid fixed CRC bytes.
     transfer(0x40 | cmd);
     transfer(arg >> 24); transfer(arg >> 16); transfer(arg >> 8); transfer(arg);
     transfer(cmd == 0 ? 0x95 : cmd == 8 ? 0x87 : 0xff);
@@ -89,6 +91,8 @@ DSTATUS disk_initialize(BYTE drive)
         Delay_Ms(10);
     }
     if (!reset_ok) goto done;
+    // CMD8 checks the card's voltage/protocol; CMD55 + ACMD41 wait until
+    // initialization is complete, and CMD58 reads addressing capability.
     if (command(8, 0x1aa) != 1) goto done;
     uint8_t r7[4];
     for (int i = 0; i < 4; ++i) r7[i] = transfer(0xff);

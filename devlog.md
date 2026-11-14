@@ -649,3 +649,60 @@ confirmed that event logs appeared on the SanDisk card. Repeated cold starts,
 previously working cards, and longer logging runs remain to be verified before
 deployment. The read-only diagnostics and their blink codes are archived in
 `ch32v203/experiments/2026-11-sd-mount/`.
+
+2026-11-13 — SD card comparison
+
+The user compared five microSD cards with Rainus. Each was formatted on the
+Mac using `diskutil eraseDisk FAT32 RAINUS MBRFormat /dev/disk4` for that
+session. The disk identifier must be rechecked for each card: `eraseDisk`
+erases the selected whole disk. The supply voltage, firmware/LED setting,
+and precise PPK2 selection boundaries were not stated with these results;
+the currents should be treated as whole-board observations, not isolated
+card measurements.
+
+| Card | Idle | “Log” current | Write peak | Write current over interval | Estimated total charge in interval |
+| --- | ---: | ---: | ---: | --- | ---: |
+| Lerdisk 2 GB | 222 µA | 1.5 mA | 30 mA | ~8 mA over 600 ms | ~4.8 mC |
+| Lerdisk 4 GB | 225 µA | 1.5 mA | 30 mA | ~8 mA over 550 ms | ~4.4 mC |
+| Lufasn-D 4 GB | 735 µA | 1.4 mA | 22 mA | 8.8 mA average over 472 ms | ~4.15 mC |
+| Cloudisk 4 GB | 233 µA | 1.7 mA | 25 mA | 7 mA average over 550 ms | ~3.85 mC |
+| Bliksem Pro Plus 8 GB | 707 µA | 1.84 mA | 43 mA | 22.8 mA average over 325 ms | ~7.41 mC |
+
+The charge figures are calculated as current × time, assuming the reported
+current is the average over the entire selected interval. They include idle
+current during that interval, and are not the incremental write-only charge.
+If the short peak was outside the averaged interval, its charge is excluded.
+The user observed that the log-entry waveform has a peak, falls, then rises
+again in a smaller, slower peak before declining. Its cause has not been
+isolated. Measurements of multiple units, cold starts, successful logs, and
+longer runs are still needed to assess repeatability and reliability.
+
+The user later measured approximately **625 µC for an event without an SD
+write**, with the event LED on. This is whole-board charge over the selected
+activity interval; its duration and how much of the charge is above the idle
+baseline were not specified. It is a measurement of the earlier firmware,
+which lit the LED for 100 ms on every event. The firmware was changed so the
+LED is on during batch SD writes instead, while retaining error flashes.
+The 625 µC value must not be assumed to apply to the new firmware without a
+new measurement.
+
+The SD-write LED was subsequently removed as well. The blue LED now stays off
+during normal event capture and batch writing, but still flashes error codes
+when `RAINUS_LED_ENABLED` is set to 1.
+
+With normal-operation lights off, the user subsequently measured a Lerdisk
+card at a **1.14 mA peak and 22.6 µC total charge for a log event**, and a
+**22.8 mA peak and 3.24 mC total charge for an SD write**. The card capacity,
+supply voltage, measurement durations, and whether the write selection
+includes the triggering event were not specified for this measurement. These
+are whole-board charge readings over the selected intervals, including idle
+current; they should not be added to a continuous idle estimate without
+accounting for that overlap.
+
+The user also tested appending to a file with approximately **6,300,000
+entries**. The observed operation took approximately **15 seconds** and
+used **113 mC** of measured charge. The card, supply voltage, selection
+boundaries and exact contents or layout of the test file were not specified
+with that result. For comparison, the current logger opens `RAINLOG.TXT`
+in append mode and closes it for each batch; the cause and repeatability of
+the long append still need investigation.

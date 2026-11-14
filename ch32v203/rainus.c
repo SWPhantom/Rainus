@@ -28,9 +28,13 @@
 
 static FATFS filesystem;
 static char chip_id[CHIP_ID_TEXT_LEN + 1];
+// Interrupt writes the queue head; the main loop removes events at the tail.
+// One slot stays empty so head == tail unambiguously means an empty queue.
 static volatile uint32_t queue[QUEUE_SIZE];
 static volatile unsigned queue_head, queue_tail, queue_overflow, clock_fault;
 static debounce_t debounce;
+// Accepted events stay in RAM until a complete batch is written to the card.
+// Losing power before a batch is written loses its buffered events.
 static uint32_t batch[BATCH_SIZE];
 static unsigned batch_count;
 #if RAINUS_DEBUG_USB
@@ -82,7 +86,7 @@ static void fail(unsigned pulses)
 }
 
 // This interrupt also runs during SD writes. It captures the time and queues
-// it; the slower filesystem and LED operations happen in the main loop.
+// it; slower filesystem operations happen in the main loop.
 __attribute__((interrupt)) void EXTI0_IRQHandler(void)
 {
     if (!(EXTI->INTFR & EXTI_Line0)) return;
@@ -95,17 +99,18 @@ __attribute__((interrupt)) void EXTI0_IRQHandler(void)
         clock_fault = CLOCK_SYNC_TIMEOUT;
         return;
     }
-    int accepted = debounce_edge(&debounce, ticks);
-    if (accepted < 0) {
+    debounce_result_t result = debounce_edge(&debounce, ticks);
+    if (result == DEBOUNCE_CLOCK_BACKWARDS) {
         clock_fault = CLOCK_MOVED_BACKWARDS;
         return;
     }
-    if (!accepted) return;
+    if (result == DEBOUNCE_IGNORED) return;
     unsigned next = (queue_head + 1) % QUEUE_SIZE;
     if (next == queue_tail) {
         queue_overflow = 1;
         return;
     }
+    // Divide 32768-Hz ticks by 32768 (2^15) for whole Unix seconds.
     queue[queue_head] = ticks >> 15;
     queue_head = next;
 }
@@ -147,6 +152,8 @@ int main(void)
 #endif
         fail(2);
     }
+    // Events can be captured while the SD card mounts. They wait in the queue
+    // until the main loop runs; an overflow stops the logger with error 4.
     enable_switch_interrupt();
     if (f_mount(&filesystem, "", 1) != FR_OK) fail(3);
 
@@ -192,10 +199,6 @@ int main(void)
         __asm__ volatile ("" ::: "memory");
         __enable_irq();
         batch[batch_count++] = seconds;
-#if RAINUS_LED_ENABLED
-        // A brief blocking indication; interrupts remain enabled during it.
-        led(1); Delay_Ms(100); led(0);
-#endif
         if (batch_count == BATCH_SIZE) {
             if (!log_write_batch(chip_id, batch, BATCH_SIZE, RAINUS_BUILD_UNIX_TIME)) fail(5);
             batch_count = 0;

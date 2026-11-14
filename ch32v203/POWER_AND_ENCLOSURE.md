@@ -53,8 +53,8 @@ control of power sequencing and signal backfeed.
    This measures the whole board at the 5 V input, including the regulator,
    card and power indicator circuitry. USB serial will not be connected.
 2. With the field firmware, record startup, several minutes without closures,
-   and at least 20 individual closures (including both batch writes and LED
-   flashes). Repeat with different cards. Record mean current, voltage, peak,
+   and at least 20 individual closures (including both batch writes).
+   Repeat with different cards. Record mean current, voltage, peak,
    and write duration; integrate the *extra* current above idle across a full
    batch to estimate charge per event. Don't infer card-only current from this
    measurement.

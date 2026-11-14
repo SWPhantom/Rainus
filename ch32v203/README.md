@@ -21,9 +21,8 @@ and PA7 MOSI. PA0 is the sensor input and the blue LED is on PA15.
 3. Power the board. After initialization it waits for a switch closure. For
    now a switch already held closed at startup is not guaranteed to be counted.
 
-When LED flashes are enabled, each accepted edge flashes the blue LED once for
-100 ms. The handler accepts an edge immediately and ignores further falling
-edges for 100 ms; this is an
+The handler accepts an edge immediately and ignores further falling edges for
+100 ms; this is an
 initial debounce choice, not a measurement of the real gauge. It filters
 short bounce but can count bounce lasting longer than 100 ms, and merges real
 closures closer than 100 ms. A closure held continuously produces no new
@@ -33,7 +32,9 @@ If the timestamp used for debouncing goes backwards while the logger is
 running, it stops with an RTC error instead of treating the jump as a new
 closure. That check cannot detect an RTC reset between boots.
 
-To turn off all firmware-controlled flashes, set `RAINUS_LED_ENABLED` to `0`
+The blue LED stays off during normal operation, including event capture and SD
+writes. When enabled, it flashes repeating error codes if a fatal error occurs.
+To turn off these firmware-controlled flashes, set `RAINUS_LED_ENABLED` to `0`
 near the top of `rainus.c`, then rebuild and flash. Set it to `1` to restore
 them. This controls the PA15 blue LED; it cannot turn off any power indicator
 that is wired directly to a power rail. With flashes disabled, fatal errors
@@ -183,14 +184,26 @@ by distribution.
 In the field build, after initialization the CPU enters **STOP mode** whenever
 its event queue is empty. The RTC's 32.768 kHz crystal keeps time. A PA0 falling
 edge wakes the CPU and triggers the interrupt handler, which reads the RTC and
-queues the event. The main loop optionally flashes the LED and adds the
-timestamp to a batch, then returns to STOP when there is no queued work. There is no periodic
+queues the event. The main loop adds the timestamp to a batch, then returns to
+STOP when there is no queued work. There is no periodic
 USB polling in this build. The SD card and board regulator remain powered: STOP
 mode does **not** mean that the RTC is the only component drawing power. A
 power-profiler measurement of the complete board is required to know the actual
 consumption and confirm that STOP mode is working as expected.
 
-The interrupt stays enabled during the LED flash and SD writes. The queue can
+The handler accepts the first falling edge and ignores further edges less than
+100 ms after the last accepted edge. This filters switch bounce, but also
+discards any real closures that occur close together. If an RTC reading goes
+backwards relative to the last accepted edge, the firmware reports an RTC
+error and stops; it does not silently accept a questionable timestamp.
+
+The main firmware is split into a few files: `rainus.c` coordinates startup,
+the interrupt, sleep and batching; `event.c` filters switch bounce; `rtc.c`
+reads and initializes the clock; `chip_id.c` formats the factory ID; `log.c`
+writes CSV batches; and `sd_spi.c` talks to the card through SPI. The `fatfs`
+directory contains the filesystem library used by the logger.
+
+The interrupt stays enabled during SD writes. The queue can
 hold 31 timestamps while the main loop is busy. If it overflows, at least one
 event was lost and the firmware stops with four repeating error flashes (when
 flashes are enabled). This queue does not prove all hardware edges are captured: closely spaced edges can
@@ -201,8 +214,9 @@ the file. Until then the events exist only in RAM. Power loss or reset can lose
 up to nine buffered events during idle, and an unfinished batch is not flushed
 automatically after a period of inactivity. A power failure during a write can
 lose the current batch and possibly corrupt earlier FAT filesystem data too.
-When enabled, the LED confirms an event was accepted into RAM, **not** that it
-was saved to the SD card. No safe power-off or manual flush exists yet.
+A write failure triggers the repeating five-flash error pattern when LED
+indications are enabled. Normal operation has no LED indication that a batch
+was written. No safe power-off or manual flush exists yet.
 
 ## Clock and records
 

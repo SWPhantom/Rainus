@@ -1,13 +1,15 @@
 #include "event.h"
 
-int debounce_edge(debounce_t *state, uint64_t tick)
+debounce_result_t debounce_edge(debounce_t *state, uint64_t tick)
 {
-    // LSE crystal ticks at 32768 Hz; round 100 ms up to 3277 ticks.
-    // Unsigned subtraction would turn a backwards clock jump into a huge
-    // interval and incorrectly accept it as a new event.
-    if (state->seen && tick < state->last_tick) return -1;
-    if (state->seen && tick - state->last_tick < 3277) return 0;
+    // An RTC reset or counter wrap could make a later reading earlier than
+    // the previous one. Report a clock fault instead of letting unsigned
+    // subtraction make that look like a very long interval.
+    if (state->seen && tick < state->last_tick) return DEBOUNCE_CLOCK_BACKWARDS;
+
+    // The RTC has 32768 ticks per second; 100 ms rounds up to 3277 ticks.
+    if (state->seen && tick - state->last_tick < 3277) return DEBOUNCE_IGNORED;
     state->seen = 1;
     state->last_tick = tick;
-    return 1;
+    return DEBOUNCE_ACCEPTED;
 }
