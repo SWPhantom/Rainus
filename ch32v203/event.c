@@ -2,9 +2,10 @@
 
 debounce_result_t debounce_edge(debounce_t *state, uint64_t tick)
 {
-    // An RTC reset or counter wrap could make a later reading earlier than
-    // the previous one. Report a clock fault instead of letting unsigned
-    // subtraction make that look like a very long interval.
+    // Time must only move forward during a run. A decreasing reading is a
+    // fault, not normal bounce. Without this check unsigned subtraction
+    // would mistake it for a huge positive interval. This does not detect
+    // resets between boots: the debounce state starts empty each boot.
     if (state->seen && tick < state->last_tick) return DEBOUNCE_CLOCK_BACKWARDS;
 
     // The RTC has 32768 ticks per second; 100 ms rounds up to 3277 ticks.

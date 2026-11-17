@@ -181,6 +181,19 @@ by distribution.
 
 ## How events, sleep and writes work
 
+Startup runs once after reset. The deployment loop then repeats:
+
+```text
+wait for an accepted event (STOP while idle in the field build)
+add its timestamp to the RAM batch
+when the batch reaches 10 events, write it and start a new batch
+```
+
+`wait_for_event()` handles the queue and faults; `sleep_until_switch_event()`
+contains the documented hardware sleep sequence. For the reasoning behind
+RTC waits, WFE, buffering and the remaining reliability issues, see the
+[firmware review](CODE_REVIEW.md).
+
 In the field build, after initialization the CPU enters **STOP mode** whenever
 its event queue is empty. The RTC's 32.768 kHz crystal keeps time. A PA0 falling
 edge wakes the CPU and triggers the interrupt handler, which reads the RTC and
@@ -309,8 +322,10 @@ A fatal error repeats groups of blue LED flashes:
 | 4 | Event queue overflow; at least one event was lost |
 | 5 | SD file open, write or close failed |
 
-The logger stops processing events on an error. A repeated error flash pattern
-itself consumes power. Power off before removing the card.
+The logger disables further switch interrupts on an error and stops until
+reset. Error flashes block; USB diagnostics run between groups in the debug
+build. The error loop itself consumes awake power. Power off before removing
+the card.
 
 Before deployment, compare a known independent closure count with the logged
 count at realistic and rapid rates, including held closures, bounce, and events

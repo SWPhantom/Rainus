@@ -706,3 +706,32 @@ boundaries and exact contents or layout of the test file were not specified
 with that result. For comparison, the current logger opens `RAINLOG.TXT`
 in append mode and closes it for each batch; the cause and repeatability of
 the long append still need investigation.
+
+2026-11-16 — Firmware readability and reliability review
+
+Refactored `rainus.c` so the deployment loop waits for one timestamp, adds it
+to the batch and writes every ten events. Queue/fault handling now lives in
+`wait_for_event()` and the existing STOP/WFE sequence is isolated in
+`sleep_until_switch_event()`, including its pending-edge check. Added comments
+explaining the hardware event, interrupt masking, compiler barriers and the
+different purposes of the interrupt queue and SD batch. Error codes now have
+names; terminal errors disable further switch interrupts while retaining
+blocking diagnostic flashes and optional USB status. Normal LEDs stay off.
+
+Chip ID conversion now uses `snprintf` with `%02X` for readability. RTC comments
+explain the control/status register, clock-domain handshakes, timeout policy,
+fractional ticks and output pointer. The timeout counters use explicit checks
+and decrements. The backwards-time check still treats a decreasing reading as
+a fatal fault; its comment no longer suggests rollover is expected in normal
+deployment. CSV data, batching, clock setup and storage lifecycle are preserved.
+
+`ch32v203/CODE_REVIEW.md` records the reasoning and concrete remaining issues:
+repeated append traversal, RTC waits inside the interrupt, unbounded SPI flag
+polling, terminal-only fault policy, RAM loss and build-time fallback on cold
+boot. Keeping a file open with per-batch sync remains a candidate change, not
+part of this refactor. Host checks do not verify wake behavior or power; a new
+hardware comparison is still needed.
+
+Validation: debounce, ID and FAT16/FAT32/CSV host tests passed. Field and USB
+debug builds passed with LEDs both enabled and disabled; generated field code
+retains the two wait instructions and pending-edge check. No flash was done.

@@ -26,15 +26,29 @@
 #define PFIC_WFI_AS_WFE  (1u << 3)
 #define PFIC_SET_EVENT   (1u << 5)
 
+// These numbers are also the repeating LED error codes and USB error values.
+typedef enum {
+    ERROR_RTC = 2,
+    ERROR_SD_MOUNT = 3,
+    ERROR_QUEUE_FULL = 4,
+    ERROR_SD_WRITE = 5
+} logger_error_t;
+
 static FATFS filesystem;
 static char chip_id[CHIP_ID_TEXT_LEN + 1];
-// Interrupt writes the queue head; the main loop removes events at the tail.
-// One slot stays empty so head == tail unambiguously means an empty queue.
-static volatile uint32_t queue[QUEUE_SIZE];
-static volatile unsigned queue_head, queue_tail, queue_overflow, clock_fault;
+// The interrupt captures events even while the main loop is writing to SD.
+// One slot stays empty: equal read/write indexes mean the queue is empty.
+// volatile makes the compiler reload shared state; wait_for_event() masks
+// interrupts while removing an item. volatile alone is not a lock.
+static volatile uint32_t event_queue[QUEUE_SIZE];
+static volatile unsigned queue_write_index, queue_read_index;
+static volatile int queue_overflow;
+static volatile clock_result_t clock_fault;
 static debounce_t debounce;
-// Accepted events stay in RAM until a complete batch is written to the card.
-// Losing power before a batch is written loses its buffered events.
+// The batch serves a different purpose from the queue: group 10 events into
+// one SD operation to save energy. Its contents stay fixed during that write,
+// while the interrupt can still add newly arriving events to event_queue.
+// All this RAM is lost on reset or power loss. Static variables start at zero.
 static uint32_t batch[BATCH_SIZE];
 static unsigned batch_count;
 #if RAINUS_DEBUG_USB
@@ -60,27 +74,38 @@ static void debug_status(void)
 }
 #endif
 
+// Optional USB work runs synchronously in the foreground. This is a no-op
+// in the field build; the debug build deliberately stays awake for USB.
+static void service_debug(void)
+{
+#if RAINUS_DEBUG_USB
+    poll_input();
+    debug_status();
+#endif
+}
+
 #if RAINUS_LED_ENABLED
 static void led(int on) { funDigitalWrite(PA15, on ? FUN_LOW : FUN_HIGH); }
 #endif
 
-// 2 = RTC, 3 = SD mount, 4 = queue overflow, 5 = SD write.
-static void fail(unsigned pulses)
+// Terminal error policy: stop accepting switch events and repeat the error
+// code until reset. LED delays block here; USB still runs between groups.
+// We do not write a sensor record with an untrusted RTC or retry a partial
+// SD batch (which could duplicate rows that were already saved).
+static void stop_with_error(logger_error_t error)
 {
+    NVIC_DisableIRQ(EXTI0_IRQn);
 #if RAINUS_DEBUG_USB
-    fatal_error = pulses;
+    fatal_error = error;
 #endif
-    (void)pulses;
+    (void)error;
     for (;;) {
 #if RAINUS_LED_ENABLED
-        for (unsigned i = 0; i < pulses; ++i) {
+        for (unsigned i = 0; i < (unsigned)error; ++i) {
             led(1); Delay_Ms(150); led(0); Delay_Ms(200);
         }
 #endif
-#if RAINUS_DEBUG_USB
-        poll_input();
-        debug_status();
-#endif
+        service_debug();
         Delay_Ms(1200);
     }
 }
@@ -105,14 +130,14 @@ __attribute__((interrupt)) void EXTI0_IRQHandler(void)
         return;
     }
     if (result == DEBOUNCE_IGNORED) return;
-    unsigned next = (queue_head + 1) % QUEUE_SIZE;
-    if (next == queue_tail) {
+    unsigned next = (queue_write_index + 1) % QUEUE_SIZE;
+    if (next == queue_read_index) {
         queue_overflow = 1;
         return;
     }
     // Divide 32768-Hz ticks by 32768 (2^15) for whole Unix seconds.
-    queue[queue_head] = ticks >> 15;
-    queue_head = next;
+    event_queue[queue_write_index] = ticks >> 15;
+    queue_write_index = next;
 }
 
 static void enable_switch_interrupt(void)
@@ -128,6 +153,77 @@ static void enable_switch_interrupt(void)
     // Also latch an event for WFE, even while interrupts are masked.
     EXTI->EVENR |= EXTI_Line0;
     NVIC_EnableIRQ(EXTI0_IRQn);
+}
+
+// A compiler barrier emits no CPU instruction. It keeps memory accesses on
+// their intended side of interrupt masking; ch32fun's irq helpers do not
+// provide that guarantee themselves. This is unrelated to waiting or sleep.
+static inline void compiler_barrier(void)
+{
+    __asm__ volatile ("" ::: "memory");
+}
+
+#if !RAINUS_DEBUG_USB
+// Called only with interrupts masked and an empty software queue.
+// WFE = Wait For Event. EXTI latches a PA0 edge as a hardware event even with
+// interrupts masked, so an edge between the empty check and sleep can wake us.
+// This QingKe core uses the RISC-V `wfi` instruction for BOTH WFI and WFE;
+// PFIC_WFI_AS_WFE chooses event behavior. PFIC_SLEEP_DEEP selects deep sleep,
+// and PWR->CTLR selects STOP rather than standby. STOP retains our RAM.
+static void sleep_until_switch_event(void)
+{
+    PWR->CTLR &= ~(PWR_CTLR_PDDS | PWR_CTLR_LPDS);
+
+    // Set and consume a software event first. An old, uncleared event would
+    // otherwise make sleep return immediately and waste power. This sequence
+    // is the one that reduced idle current in our hardware comparisons.
+    NVIC->SCTLR |= PFIC_SLEEP_DEEP | PFIC_WFI_AS_WFE | PFIC_SET_EVENT;
+    NVIC->SCTLR &= ~PFIC_SET_EVENT;
+    __asm__ volatile ("wfi" ::: "memory");
+
+    // If a switch edge arrived during that first wait, let the interrupt run
+    // now. Otherwise actually sleep; any edge after this check wakes us.
+    // Keep this check instead of ch32fun's __WFE(), which always waits twice.
+    if (!(EXTI->INTFR & EXTI_Line0))
+        __asm__ volatile ("wfi" ::: "memory");
+    NVIC->SCTLR &= ~(PFIC_SLEEP_DEEP | PFIC_WFI_AS_WFE);
+}
+#endif
+
+// Block until one accepted timestamp is available, or stop on a fault.
+// In the field build an empty queue leads to STOP, not periodic pin polling.
+// A wake can occur without a queued timestamp (e.g. a filtered bounce), so
+// check again after waking. Return with interrupts enabled before any SD work.
+static uint32_t wait_for_event(void)
+{
+    for (;;) {
+        service_debug();
+        __disable_irq();
+        compiler_barrier();
+
+        if (clock_fault || queue_overflow) {
+            logger_error_t error = clock_fault ? ERROR_RTC : ERROR_QUEUE_FULL;
+#if RAINUS_DEBUG_USB
+            if (clock_fault) clock_error = clock_fault;
+#endif
+            compiler_barrier();
+            __enable_irq();
+            stop_with_error(error);
+        }
+        if (queue_read_index != queue_write_index) {
+            uint32_t seconds = event_queue[queue_read_index];
+            queue_read_index = (queue_read_index + 1) % QUEUE_SIZE;
+            compiler_barrier();
+            __enable_irq();
+            return seconds;
+        }
+
+#if !RAINUS_DEBUG_USB
+        sleep_until_switch_event();
+#endif
+        compiler_barrier();
+        __enable_irq(); // Now run any interrupt that woke us and queued an event.
+    }
 }
 
 int main(void)
@@ -150,57 +246,22 @@ int main(void)
 #if RAINUS_DEBUG_USB
         clock_error = result;
 #endif
-        fail(2);
+        stop_with_error(ERROR_RTC);
     }
     // Events can be captured while the SD card mounts. They wait in the queue
     // until the main loop runs; an overflow stops the logger with error 4.
     enable_switch_interrupt();
-    if (f_mount(&filesystem, "", 1) != FR_OK) fail(3);
+    if (f_mount(&filesystem, "", 1) != FR_OK) stop_with_error(ERROR_SD_MOUNT);
 
+    // Initialization above runs once per reset. This loop runs for the whole
+    // deployment: wait/asleep -> collect timestamp -> write every 10 events.
+    // The SD write blocks this loop, but the switch interrupt stays enabled.
     for (;;) {
-#if RAINUS_DEBUG_USB
-        poll_input();
-        debug_status();
-#endif
-        // Keep interrupts masked between the empty check and sleep. EXTI also
-        // latches a hardware event: even an edge just before WFE wakes it.
-        // Re-enable interrupts after wake to run the queued interrupt.
-        __disable_irq();
-        __asm__ volatile ("" ::: "memory");
-        if (clock_fault || queue_overflow) {
-            unsigned error = clock_fault ? 2 : 4;
-#if RAINUS_DEBUG_USB
-            if (clock_fault) clock_error = clock_fault;
-#endif
-            __enable_irq();
-            fail(error);
-        }
-        if (queue_head == queue_tail) {
-#if !RAINUS_DEBUG_USB
-            PWR->CTLR &= ~(PWR_CTLR_PDDS | PWR_CTLR_LPDS);
-            // Enter STOP with WFE. Set and consume a software event first so
-            // a stale event cannot make every sleep attempt return immediately.
-            NVIC->SCTLR |= PFIC_SLEEP_DEEP | PFIC_WFI_AS_WFE | PFIC_SET_EVENT;
-            NVIC->SCTLR &= ~PFIC_SET_EVENT;
-            __asm__ volatile ("wfi" ::: "memory");
-            // An edge during the first WFE is still pending while interrupts
-            // are masked. Skip the second WFE so that edge gets serviced.
-            // An edge after this check wakes the second WFE directly.
-            if (!(EXTI->INTFR & EXTI_Line0))
-                __asm__ volatile ("wfi" ::: "memory");
-            NVIC->SCTLR &= ~(PFIC_SLEEP_DEEP | PFIC_WFI_AS_WFE);
-#endif
-            __asm__ volatile ("" ::: "memory");
-            __enable_irq();
-            continue;
-        }
-        uint32_t seconds = queue[queue_tail];
-        queue_tail = (queue_tail + 1) % QUEUE_SIZE;
-        __asm__ volatile ("" ::: "memory");
-        __enable_irq();
+        uint32_t seconds = wait_for_event();
         batch[batch_count++] = seconds;
         if (batch_count == BATCH_SIZE) {
-            if (!log_write_batch(chip_id, batch, BATCH_SIZE, RAINUS_BUILD_UNIX_TIME)) fail(5);
+            if (!log_write_batch(chip_id, batch, BATCH_SIZE, RAINUS_BUILD_UNIX_TIME))
+                stop_with_error(ERROR_SD_WRITE);
             batch_count = 0;
 #if RAINUS_DEBUG_USB
             saved_count += BATCH_SIZE;
