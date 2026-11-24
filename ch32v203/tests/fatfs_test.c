@@ -1,4 +1,4 @@
-// Exercise the bundled filesystem against an in-memory FAT16 volume.
+// Exercise the bundled filesystem against in-memory FAT16 and FAT32 volumes.
 #include "../fatfs/ff.h"
 #include "../fatfs/diskio.h"
 #include "../log.h"
@@ -6,8 +6,16 @@
 #include <stdio.h>
 #include <string.h>
 
+#ifndef LOG_BUFFER_LENGTH
+#define LOG_BUFFER_LENGTH 10
+#endif
+#if LOG_BUFFER_LENGTH < 1
+#error LOG_BUFFER_LENGTH must be a positive integer.
+#endif
 #define SECTORS 70000
 static BYTE image[SECTORS * 512];
+static unsigned read_sectors, write_sectors, sync_calls;
+static int fail_sync;
 
 static void word(unsigned offset, unsigned value) {
     image[offset] = value; image[offset + 1] = value >> 8;
@@ -19,15 +27,20 @@ DSTATUS disk_initialize(BYTE p) { return p ? STA_NOINIT : 0; }
 DSTATUS disk_status(BYTE p) { return p ? STA_NOINIT : 0; }
 DRESULT disk_read(BYTE p, BYTE *b, LBA_t s, UINT n) {
     if (p || !n || s >= SECTORS || n > SECTORS - s) return RES_PARERR;
+    read_sectors += n;
     memcpy(b, image + s * 512, n * 512); return RES_OK;
 }
 DRESULT disk_write(BYTE p, const BYTE *b, LBA_t s, UINT n) {
     if (p || !n || s >= SECTORS || n > SECTORS - s) return RES_PARERR;
+    write_sectors += n;
     memcpy(image + s * 512, b, n * 512); return RES_OK;
 }
 DRESULT disk_ioctl(BYTE p, BYTE cmd, void *b) {
     if (p) return RES_PARERR;
-    if (cmd == CTRL_SYNC) return RES_OK;
+    if (cmd == CTRL_SYNC) {
+        ++sync_calls;
+        return fail_sync ? RES_ERROR : RES_OK;
+    }
     if (cmd == GET_SECTOR_SIZE) { *(WORD *)b = 512; return RES_OK; }
     if (cmd == GET_BLOCK_SIZE) { *(DWORD *)b = 1; return RES_OK; }
     if (cmd == GET_SECTOR_COUNT) { *(LBA_t *)b = SECTORS; return RES_OK; }
@@ -106,8 +119,17 @@ static void check_log_format(void) {
         "CDAB207B0FBCFCE239E339E3,1794274155,1794274141\r\n"
         "CDAB207B0FBCFCE239E339E3,1794274157,1794274200\r\n";
     assert(f_mount(&fs, "", 1) == FR_OK);
+    assert(log_close()); // Closing an unused logger does nothing.
+    unsigned before_sync = sync_calls;
     assert(log_write_batch(id, first, 2, 1794274141));
+    assert(sync_calls == before_sync + 1);
     assert(log_write_batch(id, second, 1, 1794274200));
+    assert(sync_calls == before_sync + 2);
+    FILINFO info;
+    assert(f_stat("RAINLOG.TXT", &info) == FR_OK);
+    assert(info.fsize == strlen(expected)); // Size committed before close.
+    assert(log_close());
+    assert(log_close()); // Explicit cleanup is safe to repeat.
     assert(f_open(&file, "RAINLOG.TXT", FA_READ) == FR_OK);
     assert(f_read(&file, result, sizeof result - 1, &n) == FR_OK);
     assert(n == strlen(expected) && strcmp(result, expected) == 0);
@@ -119,6 +141,7 @@ static void check_log_format(void) {
     assert(f_write(&file, "old-format\r\n", 12, &n) == FR_OK && n == 12);
     assert(f_close(&file) == FR_OK);
     assert(log_write_batch(id, second, 1, 1794274200));
+    assert(log_close());
     assert(f_open(&file, "RAINLOG.TXT", FA_READ) == FR_OK);
     memset(result, 0, sizeof result);
     assert(f_read(&file, result, sizeof result - 1, &n) == FR_OK);
@@ -129,8 +152,163 @@ static void check_log_format(void) {
     assert(f_mount(0, "", 0) == FR_OK);
 }
 
+static void check_startup_open_and_empty_flush(void) {
+    FATFS fs;
+    FILINFO info;
+    assert(f_mount(&fs, "", 1) == FR_OK);
+    unsigned reads = read_sectors, writes = write_sectors, syncs = sync_calls;
+    assert(log_write_batch(NULL, NULL, 0, 1794274141));
+    assert(read_sectors == reads && write_sectors == writes && sync_calls == syncs);
+    assert(f_stat("RAINLOG.TXT", &info) == FR_NO_FILE);
+
+    assert(log_open());
+    assert(f_stat("RAINLOG.TXT", &info) == FR_OK && info.fsize == 0);
+    reads = read_sectors; writes = write_sectors; syncs = sync_calls;
+    assert(log_open()); // Already open: no second lookup or seek.
+    assert(log_write_batch(NULL, NULL, 0, 1794274141));
+    assert(read_sectors == reads && write_sectors == writes && sync_calls == syncs);
+    assert(log_close());
+    assert(f_mount(0, "", 0) == FR_OK);
+    assert(f_mount(&fs, "", 1) == FR_OK);
+    // Opening at startup creates an empty file, not an early CSV header.
+    assert(f_stat("RAINLOG.TXT", &info) == FR_OK && info.fsize == 0);
+    assert(f_unlink("RAINLOG.TXT") == FR_OK);
+    assert(f_mount(0, "", 0) == FR_OK);
+}
+
+static void check_partial_batches(void) {
+    FATFS fs;
+    FIL reader;
+    UINT n;
+    const char *id = "CDAB207B0FBCFCE239E339E3";
+    const char *header = "chip_id,event_unix_utc,build_unix_utc\r\n";
+    const uint32_t start = 1794274153;
+    uint32_t events[LOG_BUFFER_LENGTH];
+    const unsigned counts[] = {1, LOG_BUFFER_LENGTH - 1, LOG_BUFFER_LENGTH};
+    unsigned total = 0;
+    assert(f_mount(&fs, "", 1) == FR_OK);
+    assert(log_open());
+    for (unsigned batch = 0; batch < sizeof counts / sizeof counts[0]; ++batch) {
+        unsigned count = counts[batch];
+        for (unsigned i = 0; i < count; ++i) events[i] = start + total + i;
+        unsigned syncs = sync_calls;
+        assert(log_write_batch(id, events, count, 1794274141));
+        assert(sync_calls == syncs + (count != 0));
+        total += count;
+        FILINFO info;
+        assert(f_stat("RAINLOG.TXT", &info) == FR_OK);
+        assert(info.fsize == strlen(header) + total * 48);
+        unsigned reads = read_sectors, writes = write_sectors;
+        syncs = sync_calls;
+        assert(log_write_batch(NULL, NULL, 0, 1794274141));
+        assert(read_sectors == reads && write_sectors == writes && sync_calls == syncs);
+    }
+    assert(log_close());
+    assert(f_open(&reader, "RAINLOG.TXT", FA_READ) == FR_OK);
+    char actual[64], expected[64];
+    assert(f_read(&reader, actual, strlen(header), &n) == FR_OK && n == strlen(header));
+    assert(memcmp(actual, header, n) == 0);
+    for (unsigned i = 0; i < total; ++i) {
+        int length = snprintf(expected, sizeof expected, "%s,%lu,1794274141\r\n",
+                              id, (unsigned long)(start + i));
+        assert(length > 0 && (unsigned)length < sizeof expected);
+        assert(f_read(&reader, actual, length, &n) == FR_OK && n == (UINT)length);
+        assert(memcmp(actual, expected, length) == 0);
+    }
+    assert(f_eof(&reader));
+    assert(f_close(&reader) == FR_OK);
+    assert(f_unlink("RAINLOG.TXT") == FR_OK);
+    assert(f_mount(0, "", 0) == FR_OK);
+}
+
+static void check_retained_cursor(unsigned seed_bytes) {
+    FATFS fs;
+    FIL seed, reader;
+    UINT n;
+    const char *id = "CDAB207B0FBCFCE239E339E3";
+    const uint32_t start_time = 1794274153;
+    uint32_t events[10];
+    char padding[512];
+    memset(padding, 'x', sizeof padding);
+    assert(f_mount(&fs, "", 1) == FR_OK);
+
+    // Seed a contiguous file spanning many clusters on the large-file pass.
+    // Only startup open and an explicit reopen should walk that chain.
+    assert(f_open(&seed, "RAINLOG.TXT", FA_CREATE_ALWAYS | FA_WRITE) == FR_OK);
+    for (unsigned offset = 0; offset < seed_bytes; offset += sizeof padding)
+        assert(f_write(&seed, padding, sizeof padding, &n) == FR_OK && n == sizeof padding);
+    assert(f_close(&seed) == FR_OK);
+
+    read_sectors = 0;
+    assert(log_open());
+    unsigned opening_reads = read_sectors;
+    unsigned max_batch_reads = 0;
+    const unsigned batches = 33;
+    for (unsigned batch = 0; batch < batches; ++batch) {
+        for (unsigned i = 0; i < 10; ++i) events[i] = start_time + batch * 10 + i;
+        read_sectors = 0;
+        assert(log_write_batch(id, events, 10, 1794274141));
+        if (read_sectors > max_batch_reads) max_batch_reads = read_sectors;
+    }
+    // Later batches must not repeat the large-file traversal. This bound
+    // allows sector/cluster crossings and metadata I/O in these test volumes.
+    assert(max_batch_reads <= 12);
+    if (seed_bytes >= 1024 * 1024) assert(opening_reads > 2 * max_batch_reads);
+
+    assert(log_close());
+    for (unsigned i = 0; i < 10; ++i) events[i] = start_time + batches * 10 + i;
+    read_sectors = 0;
+    assert(log_open());
+    unsigned reopen_reads = read_sectors;
+    if (seed_bytes >= 1024 * 1024) assert(reopen_reads > 2 * max_batch_reads);
+    read_sectors = 0;
+    assert(log_write_batch(id, events, 10, 1794274141));
+    assert(read_sectors <= 12);
+    assert(log_close());
+
+    // Verify the retained cursor advanced correctly over sector/cluster
+    // boundaries, and reopening appended without overwriting earlier rows.
+    assert(f_open(&reader, "RAINLOG.TXT", FA_READ) == FR_OK);
+    char actual[64], expected[64];
+    assert(f_read(&reader, actual, 1, &n) == FR_OK && n == 1 && actual[0] == 'x');
+    assert(f_lseek(&reader, seed_bytes - 1) == FR_OK);
+    assert(f_read(&reader, actual, 1, &n) == FR_OK && n == 1 && actual[0] == 'x');
+    for (unsigned i = 0; i < (batches + 1) * 10; ++i) {
+        int length = snprintf(expected, sizeof expected, "%s,%lu,1794274141\r\n",
+                              id, (unsigned long)(start_time + i));
+        assert(length > 0 && (unsigned)length < sizeof expected);
+        assert(f_read(&reader, actual, length, &n) == FR_OK && n == (UINT)length);
+        assert(memcmp(actual, expected, length) == 0);
+    }
+    assert(f_eof(&reader));
+    assert(f_close(&reader) == FR_OK);
+    assert(f_unlink("RAINLOG.TXT") == FR_OK);
+    assert(f_mount(0, "", 0) == FR_OK);
+    printf("%u-byte seed: sector reads startup=%u, batch max=%u, reopen=%u\n",
+           seed_bytes, opening_reads, max_batch_reads, reopen_reads);
+}
+
+static void check_sync_failure(void) {
+    FATFS fs;
+    const uint32_t event = 1794274153;
+    assert(f_mount(&fs, "", 1) == FR_OK);
+    fail_sync = 1;
+    assert(!log_write_batch("CDAB207B0FBCFCE239E339E3", &event, 1, 1794274141));
+    fail_sync = 0;
+    // Test cleanup only. Field firmware stops on the failed batch.
+    assert(log_close());
+    assert(f_unlink("RAINLOG.TXT") == FR_OK);
+    assert(f_mount(0, "", 0) == FR_OK);
+}
+
 int main(void) {
     make_fat16(); check_volume(); check_log_format();
+    check_startup_open_and_empty_flush(); check_partial_batches();
+    check_retained_cursor(512); check_retained_cursor(3 * 1024 * 1024);
+    check_sync_failure();
     make_fat32(); check_volume(); check_log_format();
-    puts("FAT16/FAT32 filesystem and log format tests passed");
+    check_startup_open_and_empty_flush(); check_partial_batches();
+    check_retained_cursor(512); check_retained_cursor(3 * 1024 * 1024);
+    check_sync_failure();
+    puts("FAT16/FAT32 startup, partial/empty batch, cursor and sync failure tests passed");
 }

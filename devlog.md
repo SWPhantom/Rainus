@@ -735,3 +735,128 @@ hardware comparison is still needed.
 Validation: debounce, ID and FAT16/FAT32/CSV host tests passed. Field and USB
 debug builds passed with LEDs both enabled and disabled; generated field code
 retains the two wait instructions and pending-edge check. No flash was done.
+
+2026-11-22 — Retained SD append cursor experiment
+
+The user tested 6,300 files with 100 records each, then let Rainus create a new
+`RAINLOG.TXT`. Initialization appeared unchanged. The first write took **10.63 s
+and 83.71 mC**; subsequent writes took the usual **400–600 ms and 3.26 mC**.
+This measures the whole first operation, not creation separately from data
+writing, allocation or sync, so the reason for the initial delay is not yet
+isolated.
+
+Implemented an open-once logging session: the first batch opens or creates
+`RAINLOG.TXT`, then every batch appends and calls `f_sync()` while retaining the
+FatFs `FIL` object in RAM across STOP sleep. The first open can still be slow;
+later batches no longer repeat directory lookup and end-of-file traversal.
+Added `log_close()` for explicit cleanup and tests. Normal operation keeps the
+file open. CSV/header behavior, ten-event batching, SPI speed, capture, LEDs
+and sleep are unchanged. Open/write/sync failures still stop the logger with
+error 5. Root README edits and the user's log-generation script are untouched.
+
+Host tests passed on FAT16 and FAT32, checking exact CSV contents, one header,
+per-batch sync, explicit close/reopen, sector/cluster crossings and propagation
+of a sync failure. For a 3 MiB seed file, the first batch read 26 sectors on
+FAT16 and 51 on FAT32; later batches read at most 3 sectors on both. Closing
+and reopening restored the traversal cost (28 and 53 sectors respectively).
+These are simulated disk reads, not card timing or power measurements. The
+field build uses 856 bytes of static RAM, 40 bytes more than before. Field and
+USB debug builds passed. Hardware comparison and SD record verification are
+still needed; no flash was done.
+
+2026-11-22 — Startup preparation, manual service flush and batch-size trials
+
+The user confirmed the retained-cursor change on a `RAINLOG.TXT` containing
+6,300,000 entries: initialization completed normally, the first ten-event write
+took approximately 15 seconds, and subsequent writes took approximately
+500 ms. This supports moving the initial traversal to startup while retaining
+the open cursor for data batches.
+
+Added idempotent `log_open()` and called it after mount during startup. It
+opens or creates the file without a CSV header; the header is written with
+the first nonempty batch. Empty writes now return success without SD I/O.
+Automatic batching is controlled by LOG_BUFFER_LENGTH, default 10, through
+the Makefile and `LOG_BUFFER_LENGTH=64 ./deploy.sh` deployment override.
+
+PA2/A2-to-GND requests a partial flush through its own debounced, falling-edge
+interrupt. Tips and service markers share a FIFO so older queued tips precede
+the flush. Both input interrupts have equal priority; they cannot preempt one
+another while updating the queue or reading the RTC. Both pins are configured
+as wake events and checked in the pending-edge test before STOP. Capturing
+continues during startup preparation, writes and success flashes. An overflow
+retains error 4, RTC faults error 2, and file/write/sync faults error 5.
+
+The main loop writes the actual pending count for a manual request, resets it
+only after success, and continues logging. An empty request does no SD work.
+Success gives two 75 ms blue flashes, controlled by the existing master LED
+toggle; automatic logging stays dark. Later events are collected for the next
+batch. Both input interrupts are disabled on terminal faults. USB saved counts
+now add the actual number of records written, including partial batches.
+
+The per-line `f_write()` calls and sector-buffered FatFs path are preserved.
+The README describes comparing 10/32/64/128-event batches using charge per
+record with the selected interval's idle charge subtracted. Only ten-event
+charge has been measured so far; no new optimal size is claimed.
+
+Validation: host tests passed at batch lengths 1/10/32/64/128, covering separate
+debounce states, FIFO marker ordering, wraparound and overflow; startup open,
+empty/partial batches, exact CSV contents, cursor retention and sync failure
+on FAT16/FAT32. Field and USB debug builds passed at 10/32/64/128, plus both
+LED-disabled variants. A zero batch length is rejected. Generated field code
+checks both EXTI lines (mask 0x5) between the two waits. Default field static
+RAM is 1,004 bytes and flash is 8,828 bytes. No flash or new board measurement
+was performed; startup timing, PA2 wake/acknowledgment, logging after a service
+request and idle current still need a hardware check.
+
+2026-11-23 — Manual save confirmation and SD-driver readability
+
+The user reports that the code looks good and manual save works. This is a
+bench confirmation of the PA2 service feature, not a new measurement of idle
+current, flush charge or every simultaneous-input case.
+
+Recent storage results, summarized here for context (not new runs):
+
+- The original large-file test used about 6,300,000 entries and took roughly
+  15 seconds / 113 mC for an append operation with the earlier access pattern.
+- With 6,300 files of 100 records each, creating the new `RAINLOG.TXT` in the
+  first batch took 10.63 seconds / 83.71 mC; later batches took 400-600 ms /
+  3.26 mC. Creation, lookup, allocation and writing were not timed separately.
+- After keeping the file open, the user tested a single 6,300,000-entry file:
+  the initial lazy-open batch still took about 15 seconds, while subsequent
+  batches took about 500 ms. This confirmed the retained cursor's benefit.
+- File preparation has since moved to startup, and PA2 can flush the current
+  partial batch and continue logging. LOG_BUFFER_LENGTH remains configurable,
+  defaulting to ten; 32/64/128-event charge comparisons are still pending.
+
+Refactored `sd_spi.c` for readability. Helpers now describe SPI byte exchange,
+card deselection, waiting for readiness, selecting the fixed socket and sending
+an SD command. Named constants explain command indexes, R1 response values,
+dummy bytes, packet CRC/end-bit bytes, data tokens, sector size, address flags,
+GPIO assignments and polling limits. Comments describe the four initialization
+stages, why CS is driven LOW/HIGH, why reading sends dummy bytes, and why data
+CRC bytes must still be transferred even though they are not checked.
+
+Replaced the nested CRC ternary and postfix polling countdown with explicit
+control flow and shared the byte/sector address conversion between reads and
+writes. Removed a redundant include. The tested command order, argument and
+CRC values, GPIO order, SPI speed settings, delays, retry counts, CMD0 ready
+exception and reset retries are preserved. FatFs interfaces and error codes
+are unchanged. The outer ready poll retains its initial attempt plus the
+configured retries, including the final busy-result delay.
+
+Hardware polling is not a software lock. The card can report busy while it
+programs flash; bounded waits let failures reach FatFs and Rainus's terminal
+error handling (mount error 3 or file access/write/sync error 5). This is fault
+reporting rather than automatic recovery. The inner TXE/RXNE byte waits remain
+unbounded; changing that behavior is deliberately separate from this pass.
+
+Validation: existing independent-debounce/queue, chip-ID and FAT16/FAT32 log
+tests passed, including startup open, empty/partial batches, retained cursor
+and sync failures. Field and USB-debug builds passed. Compared the old and new
+drivers with the same other sources, build timestamp and compiler settings:
+field binary size changed from 8,828 to 8,820 bytes; USB-debug from 11,168 to
+11,164 bytes. Reviewed the packet bytes, address conversion, polling counts,
+chip-select transitions and explicit delays against the prior driver. The
+compiled binaries are not byte-identical; these are size comparisons, not new
+hardware timing or energy measurements. Host filesystem tests do not exercise
+the actual SPI peripheral. No flash or new power-profile run was performed.

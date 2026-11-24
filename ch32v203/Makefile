@@ -5,11 +5,13 @@ CH32FUN_ROOT ?= ../../ch32fun
 HOST_CC ?= cc
 BUILD_UNIX_TIME ?= $(shell date -u +%s)
 DEBUG_USB ?= 0
+LOG_BUFFER_LENGTH ?= 10
 ADDITIONAL_C_FILES := sd_spi.c rtc.c event.c chip_id.c log.c fatfs/ff.c
 ifeq ($(DEBUG_USB),1)
 ADDITIONAL_C_FILES += $(CH32FUN_ROOT)/extralibs/usbd.c
 endif
 EXTRA_CFLAGS += -Ifatfs -DRAINUS_BUILD_UNIX_TIME=$(BUILD_UNIX_TIME) -DRAINUS_DEBUG_USB=$(DEBUG_USB)
+EXTRA_CFLAGS += -DLOG_BUFFER_LENGTH=$(LOG_BUFFER_LENGTH)
 
 # Keep linker-script generation and all build products in this directory.
 override GENERATED_LD_FILE := $(CURDIR)/rainus.generated.ld
@@ -23,7 +25,7 @@ test:
 	./tests/event_test
 	$(HOST_CC) -std=c11 -Wall -Wextra -Werror chip_id.c tests/chip_id_test.c -o tests/chip_id_test
 	./tests/chip_id_test
-	$(HOST_CC) -std=c11 -Wall -Wextra -Ifatfs fatfs/ff.c log.c tests/fatfs_test.c -o tests/fatfs_test
+	$(HOST_CC) -std=c11 -Wall -Wextra -Ifatfs -DLOG_BUFFER_LENGTH=$(LOG_BUFFER_LENGTH) fatfs/ff.c log.c tests/fatfs_test.c -o tests/fatfs_test
 	./tests/fatfs_test
 
 # cv_clean comes from ch32fun and removes the firmware build products.

@@ -18,8 +18,13 @@
 #if RAINUS_BUILD_UNIX_TIME < 1577836800UL || RAINUS_BUILD_UNIX_TIME > 4294967295UL
 #error Build time must be a valid Unix timestamp between 2020 and 2106.
 #endif
-#define BATCH_SIZE 10
-#define QUEUE_SIZE 32 // Holds up to 31 edges while foreground code is busy.
+#ifndef LOG_BUFFER_LENGTH
+#define LOG_BUFFER_LENGTH 10
+#endif
+#if LOG_BUFFER_LENGTH < 1
+#error LOG_BUFFER_LENGTH must be a positive integer.
+#endif
+#define INPUT_LINES (EXTI_Line0 | EXTI_Line2)
 
 // Bits in the interrupt controller's system-control register.
 #define PFIC_SLEEP_DEEP  (1u << 2)
@@ -36,20 +41,17 @@ typedef enum {
 
 static FATFS filesystem;
 static char chip_id[CHIP_ID_TEXT_LEN + 1];
-// The interrupt captures events even while the main loop is writing to SD.
-// One slot stays empty: equal read/write indexes mean the queue is empty.
-// volatile makes the compiler reload shared state; wait_for_event() masks
-// interrupts while removing an item. volatile alone is not a lock.
-static volatile uint32_t event_queue[QUEUE_SIZE];
-static volatile unsigned queue_write_index, queue_read_index;
-static volatile int queue_overflow;
+// Tips and flush markers share one queue, preserving their processing order.
+// Both input interrupts have the same priority and cannot preempt each other.
+// Foreground code masks interrupts while examining/removing queued items.
+static event_queue_t event_queue;
 static volatile clock_result_t clock_fault;
-static debounce_t debounce;
-// The batch serves a different purpose from the queue: group 10 events into
+static debounce_t tip_debounce, flush_debounce;
+// The batch serves a different purpose from the queue: group timestamps into
 // one SD operation to save energy. Its contents stay fixed during that write,
 // while the interrupt can still add newly arriving events to event_queue.
 // All this RAM is lost on reset or power loss. Static variables start at zero.
-static uint32_t batch[BATCH_SIZE];
+static uint32_t batch[LOG_BUFFER_LENGTH];
 static unsigned batch_count;
 #if RAINUS_DEBUG_USB
 static volatile int status_requested;
@@ -88,6 +90,16 @@ static void service_debug(void)
 static void led(int on) { funDigitalWrite(PA15, on ? FUN_LOW : FUN_HIGH); }
 #endif
 
+// Only an explicit manual flush gets a success indication. Interrupts stay
+// enabled during these short delays, so new tips continue entering the queue.
+static void acknowledge_flush(void)
+{
+#if RAINUS_LED_ENABLED
+    led(1); Delay_Ms(75); led(0); Delay_Ms(75);
+    led(1); Delay_Ms(75); led(0);
+#endif
+}
+
 // Terminal error policy: stop accepting switch events and repeat the error
 // code until reset. LED delays block here; USB still runs between groups.
 // We do not write a sensor record with an untrusted RTC or retry a partial
@@ -95,6 +107,7 @@ static void led(int on) { funDigitalWrite(PA15, on ? FUN_LOW : FUN_HIGH); }
 static void stop_with_error(logger_error_t error)
 {
     NVIC_DisableIRQ(EXTI0_IRQn);
+    NVIC_DisableIRQ(EXTI2_IRQn);
 #if RAINUS_DEBUG_USB
     fatal_error = error;
 #endif
@@ -110,8 +123,28 @@ static void stop_with_error(logger_error_t error)
     }
 }
 
-// This interrupt also runs during SD writes. It captures the time and queues
-// it; slower filesystem operations happen in the main loop.
+// Shared capture path. Each pin has its own debounce history, so the service
+// button cannot debounce away a nearby rain tip (or vice versa). No SD I/O
+// happens here. Same-priority handlers serialize access to the RTC and queue.
+static void capture_edge(event_kind_t kind, debounce_t *debounce)
+{
+    uint64_t ticks;
+    if (!clock_ticks(&ticks)) {
+        clock_fault = CLOCK_SYNC_TIMEOUT;
+        return;
+    }
+    debounce_result_t result = debounce_edge(debounce, ticks);
+    if (result == DEBOUNCE_CLOCK_BACKWARDS) {
+        clock_fault = CLOCK_MOVED_BACKWARDS;
+        return;
+    }
+    if (result == DEBOUNCE_IGNORED) return;
+    // Divide 32768-Hz ticks by 32768 (2^15) for whole Unix seconds.
+    input_event_t event = {kind, (uint32_t)(ticks >> 15)};
+    event_queue_push(&event_queue, event); // A full queue latches the fault.
+}
+
+// These handlers also run during startup SD preparation and batch writes.
 __attribute__((interrupt)) void EXTI0_IRQHandler(void)
 {
     if (!(EXTI->INTFR & EXTI_Line0)) return;
@@ -119,40 +152,34 @@ __attribute__((interrupt)) void EXTI0_IRQHandler(void)
 #if RAINUS_DEBUG_USB
     ++interrupt_count;
 #endif
-    uint64_t ticks;
-    if (!clock_ticks(&ticks)) {
-        clock_fault = CLOCK_SYNC_TIMEOUT;
-        return;
-    }
-    debounce_result_t result = debounce_edge(&debounce, ticks);
-    if (result == DEBOUNCE_CLOCK_BACKWARDS) {
-        clock_fault = CLOCK_MOVED_BACKWARDS;
-        return;
-    }
-    if (result == DEBOUNCE_IGNORED) return;
-    unsigned next = (queue_write_index + 1) % QUEUE_SIZE;
-    if (next == queue_read_index) {
-        queue_overflow = 1;
-        return;
-    }
-    // Divide 32768-Hz ticks by 32768 (2^15) for whole Unix seconds.
-    event_queue[queue_write_index] = ticks >> 15;
-    queue_write_index = next;
+    capture_edge(EVENT_TIP, &tip_debounce);
 }
 
-static void enable_switch_interrupt(void)
+__attribute__((interrupt)) void EXTI2_IRQHandler(void)
 {
-    // A dry contact from PA0 to GND pulls the normally-high pin LOW.
+    if (!(EXTI->INTFR & EXTI_Line2)) return;
+    EXTI->INTFR = EXTI_Line2;
+    capture_edge(EVENT_FLUSH, &flush_debounce);
+}
+
+static void enable_switch_interrupts(void)
+{
+    // Dry contacts from PA0/PA2 to GND pull the normally-high inputs LOW.
     funPinMode(PA0, GPIO_CFGLR_IN_PUPD);
     funDigitalWrite(PA0, FUN_HIGH);
-    AFIO->EXTICR[0] &= ~AFIO_EXTICR1_EXTI0;
-    EXTI->RTENR &= ~EXTI_Line0;
-    EXTI->FTENR |= EXTI_Line0;
-    EXTI->INTFR = EXTI_Line0;
-    EXTI->INTENR |= EXTI_Line0;
+    funPinMode(PA2, GPIO_CFGLR_IN_PUPD);
+    funDigitalWrite(PA2, FUN_HIGH);
+    AFIO->EXTICR[0] &= ~(AFIO_EXTICR1_EXTI0 | AFIO_EXTICR1_EXTI2);
+    EXTI->RTENR &= ~INPUT_LINES;
+    EXTI->FTENR |= INPUT_LINES;
+    EXTI->INTFR = INPUT_LINES;
+    EXTI->INTENR |= INPUT_LINES;
     // Also latch an event for WFE, even while interrupts are masked.
-    EXTI->EVENR |= EXTI_Line0;
+    EXTI->EVENR |= INPUT_LINES;
+    NVIC_SetPriority(EXTI0_IRQn, 0);
+    NVIC_SetPriority(EXTI2_IRQn, 0);
     NVIC_EnableIRQ(EXTI0_IRQn);
+    NVIC_EnableIRQ(EXTI2_IRQn);
 }
 
 // A compiler barrier emits no CPU instruction. It keeps memory accesses on
@@ -165,7 +192,7 @@ static inline void compiler_barrier(void)
 
 #if !RAINUS_DEBUG_USB
 // Called only with interrupts masked and an empty software queue.
-// WFE = Wait For Event. EXTI latches a PA0 edge as a hardware event even with
+// WFE = Wait For Event. EXTI latches either input as a hardware event even with
 // interrupts masked, so an edge between the empty check and sleep can wake us.
 // This QingKe core uses the RISC-V `wfi` instruction for BOTH WFI and WFE;
 // PFIC_WFI_AS_WFE chooses event behavior. PFIC_SLEEP_DEEP selects deep sleep,
@@ -184,24 +211,24 @@ static void sleep_until_switch_event(void)
     // If a switch edge arrived during that first wait, let the interrupt run
     // now. Otherwise actually sleep; any edge after this check wakes us.
     // Keep this check instead of ch32fun's __WFE(), which always waits twice.
-    if (!(EXTI->INTFR & EXTI_Line0))
+    if (!(EXTI->INTFR & INPUT_LINES))
         __asm__ volatile ("wfi" ::: "memory");
     NVIC->SCTLR &= ~(PFIC_SLEEP_DEEP | PFIC_WFI_AS_WFE);
 }
 #endif
 
-// Block until one accepted timestamp is available, or stop on a fault.
+// Block until one accepted tip or flush request is available, or stop on a fault.
 // In the field build an empty queue leads to STOP, not periodic pin polling.
 // A wake can occur without a queued timestamp (e.g. a filtered bounce), so
 // check again after waking. Return with interrupts enabled before any SD work.
-static uint32_t wait_for_event(void)
+static input_event_t wait_for_event(void)
 {
     for (;;) {
         service_debug();
         __disable_irq();
         compiler_barrier();
 
-        if (clock_fault || queue_overflow) {
+        if (clock_fault || event_queue.overflow) {
             logger_error_t error = clock_fault ? ERROR_RTC : ERROR_QUEUE_FULL;
 #if RAINUS_DEBUG_USB
             if (clock_fault) clock_error = clock_fault;
@@ -210,12 +237,11 @@ static uint32_t wait_for_event(void)
             __enable_irq();
             stop_with_error(error);
         }
-        if (queue_read_index != queue_write_index) {
-            uint32_t seconds = event_queue[queue_read_index];
-            queue_read_index = (queue_read_index + 1) % QUEUE_SIZE;
+        input_event_t event;
+        if (event_queue_pop(&event_queue, &event)) {
             compiler_barrier();
             __enable_irq();
-            return seconds;
+            return event;
         }
 
 #if !RAINUS_DEBUG_USB
@@ -248,24 +274,31 @@ int main(void)
 #endif
         stop_with_error(ERROR_RTC);
     }
-    // Events can be captured while the SD card mounts. They wait in the queue
-    // until the main loop runs; an overflow stops the logger with error 4.
-    enable_switch_interrupt();
+    // Capture starts after the RTC is ready. Inputs can queue events while SD
+    // startup is busy; the main loop processes them after log_open() finishes.
+    enable_switch_interrupts();
     if (f_mount(&filesystem, "", 1) != FR_OK) stop_with_error(ERROR_SD_MOUNT);
+    // Pay the initial directory lookup / end-of-file traversal here, rather
+    // than on the first data batch. Opening an empty file writes no CSV rows.
+    if (!log_open()) stop_with_error(ERROR_SD_WRITE);
 
     // Initialization above runs once per reset. This loop runs for the whole
-    // deployment: wait/asleep -> collect timestamp -> write every 10 events.
-    // The SD write blocks this loop, but the switch interrupt stays enabled.
+    // deployment: wait/asleep -> collect a tip or service a flush request.
+    // SD writes block this loop, but both input interrupts stay enabled.
     for (;;) {
-        uint32_t seconds = wait_for_event();
-        batch[batch_count++] = seconds;
-        if (batch_count == BATCH_SIZE) {
-            if (!log_write_batch(chip_id, batch, BATCH_SIZE, RAINUS_BUILD_UNIX_TIME))
+        input_event_t event = wait_for_event();
+        if (event.kind == EVENT_TIP) batch[batch_count++] = event.seconds;
+        if (batch_count == LOG_BUFFER_LENGTH || event.kind == EVENT_FLUSH) {
+            unsigned count = batch_count;
+            if (!log_write_batch(chip_id, batch, count, RAINUS_BUILD_UNIX_TIME))
                 stop_with_error(ERROR_SD_WRITE);
             batch_count = 0;
 #if RAINUS_DEBUG_USB
-            saved_count += BATCH_SIZE;
+            saved_count += count;
 #endif
+            // The marker follows all tips this acknowledgment covers. Tips
+            // queued after it remain in the next batch; this isn't a shutdown.
+            if (event.kind == EVENT_FLUSH) acknowledge_flush();
         }
     }
 }

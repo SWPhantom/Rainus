@@ -1,10 +1,20 @@
 # Firmware review — 2026-11-16
 
+Updated 2026-11-22: the logger now opens the file during startup, keeps it open
+and syncs each batch. PA2 adds an ordered manual-flush request. Automatic batch
+length is configurable, with ten remaining the default.
+
+Updated 2026-11-23: the user reports that manual save works. The SD driver has
+received a readability pass with descriptive helpers, named protocol values
+and comments explaining hardware polling and its return values. Command
+sequencing, explicit delays, retry budgets and error policy are preserved.
+
 The main readability problem was that startup, interrupt/foreground sharing,
 sleep entry and batching were all mixed into `main()`. The refactor puts the
 hardware wait in `sleep_until_switch_event()` and queue/fault handling in
-`wait_for_event()`. The deployment loop now waits for a timestamp, adds it to
-the batch and writes when ten have accumulated. Initialization runs once per
+`wait_for_event()`. The deployment loop waits for a tip or flush request,
+adds tip timestamps to the batch and writes when full or manually requested.
+Initialization runs once per
 reset; the event loop continues for the lifetime of that run.
 
 ## Decisions behind the code
@@ -40,12 +50,16 @@ an error value. The current code requests synchronization on every read,
 including edges that occur while the CPU is already awake.
 
 **Two RAM arrays.** The interrupt queue preserves arrival times while SD work
-blocks the main loop. The batch groups ten timestamps to reduce the frequency
+blocks the main loop. The batch groups timestamps to reduce the frequency
 of writes. A write may take seconds: the measured 15-second operation overlaps
 roughly three closures at a five-second interval. Blocking capture during that
 operation would risk losing them. The two arrays are not alternating DMA
 buffers and there is no task scheduler or application priority system. They
-have different jobs and cost 168 bytes of timestamp storage altogether.
+have different jobs. With the default length of ten, their payloads cost 296
+bytes: 32 typed queue entries of 8 bytes and ten 4-byte timestamps. The queue
+also carries manual-flush markers in order, avoiding a flag that could overtake
+previously queued tips. The PA0 and PA2 handlers share the same interrupt
+priority and cannot preempt one another; foreground pops mask interrupts.
 
 **Sleep and assembly.** WFE means Wait For Event. On this QingKe core, the
 instruction is spelled `wfi`; a control-register bit selects event behavior.
@@ -61,20 +75,23 @@ it. The empty assembly statements are compiler barriers, emitting no CPU
 instructions; they keep memory operations on the intended side of interrupt
 masking. ch32fun's interrupt helpers do not have memory clobbers themselves.
 
-**LED and USB.** Normal operation has no LED flashes. Terminal-error flashes
-already use blocking delays. USB status work runs synchronously in foreground
+**LED and USB.** Automatic logging has no LED flashes. A PA2 service request
+gets two brief flashes after success, even if its batch was empty. These and
+terminal-error flashes use blocking delays with input capture still enabled
+for successful service requests. USB status work runs synchronously in foreground
 code; the optional debug build stays awake so the console can remain usable.
-Terminal errors now also disable the switch interrupt. USB interrupts remain
+Terminal errors disable both input interrupts. USB interrupts remain
 available for diagnostics. Error blink numbers and CSV contents are preserved.
 
 ## Concrete limitations that remain
 
-1. **Append cost grows with file size.** `log_write_batch()` reopens the file
-   for every batch; the bundled FatFs follows the cluster chain to the end on
-   each append open. The observed 15 seconds / 113 mC is a reason to measure
-   opening separately from writing. Keeping the file open and using `f_sync`
-   per batch is a promising next change, along with bounded-size log files.
-   This review does not change the storage lifecycle or format.
+1. **Startup open can be expensive.** `log_open()` opens once after mounting
+   and walks to the end. Data batches retain that cursor and sync without
+   reopening. The user confirmed roughly 15 seconds for the first lazy-open
+   batch followed by 500 ms for later batches on a 6.3-million-record file.
+   That traversal now moves to startup; it is not eliminated. PA2 manual save
+   has been reported working; startup timing, concurrent-input tests and idle
+   current after these changes still need measurement. CSV is unchanged.
 2. **The interrupt is not guaranteed to be brief.** RTC synchronization uses
    1 ms polling delays and can wait up to 100 ms on a failure. Edges can
    coalesce in hardware while the handler is occupied. Reducing repeated
@@ -96,10 +113,13 @@ available for diagnostics. Error blink numbers and CSV contents are preserved.
 
 ## Validation
 
-`make test` passed for debounce outcomes, ID byte order and CSV/FAT16/FAT32
-behavior. Field and USB debug builds passed with the LED switch both on and
-off. Generated field code retains the two wait instructions and pending-edge
-check. Host tests cannot verify STOP current, wake races or peripheral clock
+`make test` passed for independent debounce states, FIFO flush-marker ordering,
+queue wraparound/overflow, ID byte order, startup open, empty/partial batches,
+retained cursor and sync failures on FAT16/FAT32. Host checks also passed with
+batch lengths 1, 10, 32, 64 and 128. Field and USB debug builds passed for all
+four benchmark sizes, plus LED-disabled builds; zero length is rejected.
+Generated field code retains the two wait instructions and checks both input
+lines before the second wait. Host tests cannot verify STOP current, wake races or peripheral clock
 handshakes. Before deployment, repeat cold starts, compare a known closure
 count (including closures during a long write), verify the SD contents and
 measure idle current on the board. This refactor has not been flashed as part

@@ -157,23 +157,29 @@ not currents on opposite sides of a voltage converter.
 
 ## Storage versus buffering
 
-The firmware batches 10 event timestamps in RAM, while an interrupt-driven
-queue holds up to 31 additional events during an SD write. Between successful
-commits, a power loss can lose up to nine buffered events. During a write, it
+The firmware batches LOG_BUFFER_LENGTH event timestamps in RAM (default 10),
+while an interrupt-driven queue holds up to 31 input events, including manual
+flush requests, during an SD write. Between successful commits, a power loss
+can lose up to LOG_BUFFER_LENGTH minus one buffered events. During a write, it
 can lose the current batch or corrupt earlier FAT data as well. An unfinished
-batch remains in RAM indefinitely during a dry period. A safe service flush and
-low-battery handling are not implemented. A queue overflow stops the logger
+batch remains in RAM during a dry period until a PA2 manual flush or further
+tips fill it. PA2 writes the partial batch, syncs and acknowledges with two
+brief flashes when LEDs are enabled; logging then continues. Low-battery
+handling is not implemented. A queue overflow stops the logger
 with an error (visible only when LED flashes are enabled), but may already have
 lost events. Test capture under real write delays and realistic bounce before
 relying on it.
 
-Batching may save energy, but the actual card idle current and event energy
-still need measuring. FRAM or another nonvolatile store remains an option for
-reducing the loss window. The firmware opens the same file in append mode once
-per batch. The bundled FatFs implementation walks the file's cluster chain to
-find the end on open, so append latency and reads can grow as the log gets
-larger. Test a large representative file and evaluate bounded-size files and a
-safe recovery strategy before a long deployment.
+The firmware opens the log in append mode during startup and retains its
+FatFs file object across STOP sleep, syncing each batch. This avoids repeated
+directory lookup and traversal of the cluster chain to the end. The initial
+open or creation can still be slow, and other card/allocation delays remain.
+Compare startup and data batches on large files and crowded directories using
+the PPK2; host sector-read tests do not measure card energy. Measure automatic
+batches of 10, 32, 64 and 128, then compare incremental charge per record rather
+than assuming that every batch uses the ten-record measurement's charge.
+See the README for the experiment procedure. FRAM or another nonvolatile store
+remains an option if a smaller loss window becomes important.
 
 ## Oil and water
 

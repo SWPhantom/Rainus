@@ -7,7 +7,8 @@ the optional USB debug build stays awake. STOP mode and long-term reliability
 still need verification on the actual board and card.
 
 The onboard microSD socket uses SPI1: PA3 is chip select, PA5 clock, PA6 MISO,
-and PA7 MOSI. PA0 is the sensor input and the blue LED is on PA15.
+and PA7 MOSI. PA0 is the sensor input, PA2 is the manual flush input, and the
+blue LED is on PA15.
 [Board maker's schematic and documentation](https://github.com/wuxx/nanoCH32V203).
 
 ## Connect and prepare
@@ -16,9 +17,12 @@ and PA7 MOSI. PA0 is the sensor input and the blue LED is on PA15.
    and GND. The internal pull-up holds PA0 high while the switch is open; a
    closure pulls it low and triggers a falling-edge interrupt. Do not connect a
    powered sensor circuit to the pin.
-2. Insert a spare FAT16- or FAT32-formatted microSD/SDHC card. The driver
-   supports SD version 2 cards; exFAT is not supported.
-3. Power the board. After initialization it waits for a switch closure. For
+2. Optionally connect a voltage-free service button between PA2 (A2) and GND.
+   A brief closure requests a flush of the pending events; it is not a rain tip.
+3. Insert a spare FAT16- or FAT32-formatted microSD card. The driver supports
+   SD v2+ SDSC/SDHC/SDXC cards in SPI mode; exFAT is not supported.
+4. Power the board. Startup now opens the log and finds its end, which can take
+   about 15 seconds for the large test file. Afterward it waits for input. For
    now a switch already held closed at startup is not guaranteed to be counted.
 
 The handler accepts an edge immediately and ignores further falling edges for
@@ -26,14 +30,16 @@ The handler accepts an edge immediately and ignores further falling edges for
 initial debounce choice, not a measurement of the real gauge. It filters
 short bounce but can count bounce lasting longer than 100 ms, and merges real
 closures closer than 100 ms. A closure held continuously produces no new
-falling edges. Test with the actual gauge.
+falling edges. Each pin has independent debounce state. Test with the actual
+gauge and service button.
 
 If the timestamp used for debouncing goes backwards while the logger is
 running, it stops with an RTC error instead of treating the jump as a new
 closure. That check cannot detect an RTC reset between boots.
 
-The blue LED stays off during normal operation, including event capture and SD
-writes. When enabled, it flashes repeating error codes if a fatal error occurs.
+The blue LED stays off during automatic event capture and SD writes. A manual
+PA2 flush gives two brief success flashes after completion, including when the
+buffer was already empty. Fatal errors repeat groups of error flashes.
 To turn off these firmware-controlled flashes, set `RAINUS_LED_ENABLED` to `0`
 near the top of `rainus.c`, then rebuild and flash. Set it to `1` to restore
 them. This controls the PA15 blue LED; it cannot turn off any power indicator
@@ -92,6 +98,17 @@ the host-native USB programmer on the computer you're using; don't copy a macOS
 `minichlink` executable onto Linux. If ch32fun is elsewhere, pass its path to
 make, for example `make build CH32FUN_ROOT=/path/to/ch32fun`, and use that
 checkout's `minichlink` path in the commands below.
+
+Automatic batches default to ten events. Override the length for a build or
+host test with `make -B build LOG_BUFFER_LENGTH=64` or
+`make test LOG_BUFFER_LENGTH=64`. For the one-step deployment script:
+
+```sh
+LOG_BUFFER_LENGTH=64 ./deploy.sh
+```
+
+The value must be a positive integer and the arrays must fit available RAM.
+Ten remains the default pending the measurements below.
 
 Run `make clean` in `Rainus/ch32v203` to remove the generated firmware files,
 linker script and local test executables. It leaves source files and the
@@ -184,9 +201,9 @@ by distribution.
 Startup runs once after reset. The deployment loop then repeats:
 
 ```text
-wait for an accepted event (STOP while idle in the field build)
-add its timestamp to the RAM batch
-when the batch reaches 10 events, write it and start a new batch
+wait for a tip or manual-flush request (STOP while idle in the field build)
+for a tip: add its timestamp; write and clear when LOG_BUFFER_LENGTH is reached
+for a manual flush: write and clear the partial batch, acknowledge, then continue
 ```
 
 `wait_for_event()` handles the queue and faults; `sleep_until_switch_event()`
@@ -195,9 +212,10 @@ RTC waits, WFE, buffering and the remaining reliability issues, see the
 [firmware review](CODE_REVIEW.md).
 
 In the field build, after initialization the CPU enters **STOP mode** whenever
-its event queue is empty. The RTC's 32.768 kHz crystal keeps time. A PA0 falling
-edge wakes the CPU and triggers the interrupt handler, which reads the RTC and
-queues the event. The main loop adds the timestamp to a batch, then returns to
+its event queue is empty. The RTC's 32.768 kHz crystal keeps time. A PA0 or PA2
+falling edge wakes the CPU and triggers its interrupt handler, which reads the
+RTC, debounces that input and queues a tip or flush marker. The main loop
+processes the event, then returns to
 STOP when there is no queued work. There is no periodic
 USB polling in this build. The SD card and board regulator remain powered: STOP
 mode does **not** mean that the RTC is the only component drawing power. A
@@ -211,25 +229,110 @@ backwards relative to the last accepted edge, the firmware reports an RTC
 error and stops; it does not silently accept a questionable timestamp.
 
 The main firmware is split into a few files: `rainus.c` coordinates startup,
-the interrupt, sleep and batching; `event.c` filters switch bounce; `rtc.c`
+the interrupts, sleep and batching; `event.c` filters switch bounce and holds
+the FIFO queue; `rtc.c`
 reads and initializes the clock; `chip_id.c` formats the factory ID; `log.c`
 writes CSV batches; and `sd_spi.c` talks to the card through SPI. The `fatfs`
 directory contains the filesystem library used by the logger.
 
-The interrupt stays enabled during SD writes. The queue can
-hold 31 timestamps while the main loop is busy. If it overflows, at least one
+Both input interrupts stay enabled during SD writes. The queue can
+hold 31 events (tips and flush markers) while the main loop is busy. If it overflows, at least one
 event was lost and the firmware stops with four repeating error flashes (when
 flashes are enabled). This queue does not prove all hardware edges are captured: closely spaced edges can
 coalesce while an interrupt is pending, and switch bounce is filtered.
 
-After **10 events**, the firmware appends the batch to `RAINLOG.TXT` and closes
-the file. Until then the events exist only in RAM. Power loss or reset can lose
-up to nine buffered events during idle, and an unfinished batch is not flushed
+After **LOG_BUFFER_LENGTH tips (default 10)**, the firmware appends the batch
+to `RAINLOG.TXT` and calls `f_sync()`. Startup opens the file after mounting and
+finds its end. The file stays open across STOP sleep, retaining its byte position
+and current cluster in RAM. Data batches avoid reopening, directory lookup and
+traversal from the first cluster. The initial open/create can still be slow with
+a large file or directory; that work now happens during startup after each
+reset. Both inputs can queue events while SD preparation is busy. The card
+remains powered.
+
+Until a batch is saved, its events exist only in RAM. Power loss or reset can lose
+up to LOG_BUFFER_LENGTH minus one buffered events during idle, and an unfinished batch is not flushed
 automatically after a period of inactivity. A power failure during a write can
 lose the current batch and possibly corrupt earlier FAT filesystem data too.
 A write failure triggers the repeating five-flash error pattern when LED
-indications are enabled. Normal operation has no LED indication that a batch
-was written. No safe power-off or manual flush exists yet.
+indications are enabled. Automatic writes have no LED indication.
+
+### Manually saving a partial batch
+
+Briefly connect **PA2/A2 to GND**, then release it. The flush marker is processed
+after earlier queued tips; their timestamps are written along with the pending
+batch and synced. The count clears only after a successful write. An empty
+batch causes no SD I/O and adds no row. Two 75 ms blue flashes acknowledge
+completion, unless `RAINUS_LED_ENABLED=0`. Error flashes repeat instead of a
+success acknowledgment on failure.
+
+The logger continues operating after this action. A held service button does
+not repeatedly flush. Tips queued after the marker go into the next batch,
+including tips captured during the write or acknowledgment flashes. Thus the
+acknowledgment covers events ahead of that request, not every event that might
+arrive later. To collect the card, disconnect power after acknowledgment before
+removing it. With LEDs disabled there is no visual success indication.
+
+For a bench check at the default length, start with a new log, wait for startup
+to finish, then generate one PA0 tip and press PA2: expect one CSV row and two
+success flashes. Repeat with nine tips. Press PA2 again with no new tips:
+expect another acknowledgment but no added rows. Also check a held PA2 contact,
+a request during an automatic write, and subsequent normal logging. Verify the
+card contents after powering off, and measure the idle current after release.
+
+The logging module also exposes `log_close()` for explicit cleanup and tests;
+the deployment loop does not call it. Code must close the log before remounting
+the card or opening the file through another handle. Do not remove or swap the
+card during a run.
+
+### Comparing startup and retained-cursor writes
+
+Use the same card, supply and ten-event batches for each comparison. Measure
+startup separately from at least three data batches, using:
+
+- A new or empty `RAINLOG.TXT`.
+- A large existing `RAINLOG.TXT`, such as the 6.3-million-record test file.
+- A new `RAINLOG.TXT` in the directory containing the 6,300 test files.
+
+Record duration and charge with the PPK2, then power off and confirm the records
+on the card. The expected behavior is a potentially long startup, followed by
+normal-duration data batches, including the first. Check idle current after
+writes as well. The CSV and SPI speed are unchanged.
+
+`make test` checks the CSV/header and sync behavior on FAT16/FAT32, including
+sector/cluster crossings, explicit startup open and close/reopen, empty/partial
+batches and a sync error. Independent debounce and event-queue tests cover
+flush-marker ordering, wraparound and overflow. The mock disk counts reads for
+small and 3 MiB files to check that traversal happens during open, not data
+batches. These counts are not hardware timings.
+
+### Choosing a batch length
+
+Compare these sizes with the same card, supply, SPI speed and file layout:
+
+| LOG_BUFFER_LENGTH | Timestamp RAM | CSV bytes per full batch* | Fill time at one tip / 5 s |
+| --- | ---: | ---: | ---: |
+| 10 | 40 bytes | 480 | 50 s |
+| 32 | 128 bytes | 1,536 | 2 min 40 s |
+| 64 | 256 bytes | 3,072 | 5 min 20 s |
+| 128 | 512 bytes | 6,144 | 10 min 40 s |
+
+*For the current 24-character ID and ten-digit timestamps, excluding the header.
+The starting file offset is not necessarily aligned to a sector boundary.
+
+The writer calls `f_write()` once per formatted line, then syncs once per batch.
+FatFs caches those calls in a 512-byte sector buffer, so this is not necessarily
+a physical write per line. The driver still transfers sectors individually.
+Manual flushes write the actual partial count, independent of the configured
+automatic batch length.
+
+Measure several steady-state batches per size, recording their duration,
+charge, record count and resting idle current. Compare incremental charge per
+record as `(batch charge - idle current * batch duration) / record count`.
+Startup and manual-flush acknowledgment flashes should be outside that
+measurement. Larger batches transfer more bytes, so the measured 3.26 mC for
+ten records must not be treated as a constant cost for every batch size. Keep
+the default at ten until the charge-per-record measurements show a useful gain.
 
 ## Clock and records
 
@@ -277,13 +380,34 @@ date -u -d '@1794274153'
 Older versions used other columns. Existing nonempty `RAINLOG.TXT` files are
 left intact and do not get a new header; appending to one will mix formats.
 Archive or rename the old file while the board is powered off to start a new,
-self-describing log. The header and events are written when the first batch of
-ten is saved, not at startup.
+self-describing log. Startup opens/creates the file without writing its CSV
+header; the header appears with the first nonempty automatic or manual batch.
 
 The board schematic shows no separate backup battery on VBAT. Do not assume
 that the RTC will retain time when power is removed. The MCU's VBAT range is
 1.8–3.6 V; a charged 18650 must not be connected directly to VBAT or 3.3 V.
 See the [power and enclosure notes](POWER_AND_ENCLOSURE.md).
+
+## How the SD driver communicates
+
+`sd_spi.c` controls one fixed SPI1 socket. Selecting the card means pulling
+its PA3 chip-select pin LOW; deselecting drives it HIGH and supplies trailing
+clocks. `spi_exchange_byte()` sends one byte and receives one simultaneously,
+polling the hardware TXE/RXNE flags. It does not disable sensor interrupts.
+
+`sd_send_command()` sends an SD command packet and returns the first response
+byte (R1), or a named no-response sentinel. Commands, data tokens, CRC bytes,
+address flags, pins and waiting limits have named constants. The driver moves
+512-byte sectors; `log.c` and FatFs handle CSV and files above it. Busy-card
+checks send fill bytes to supply clocks until the card reports ready. Their
+retry budgets include 1 ms delays and are not exact elapsed-time deadlines.
+
+The driver keeps the tested startup delay, CMD0 readiness exception and reset
+retries that resolved the SanDisk cold-start failure. Card-operation failures
+propagate through FatFs to error 3 during mount or error 5 during file access.
+The byte-level TXE/RXNE waits remain unbounded; bounding them is a separate
+behavior change. GPIO event capture continues during normal SD waits, although
+the foreground logger is occupied by the operation.
 
 ## USB diagnostics (optional build)
 
@@ -320,7 +444,7 @@ A fatal error repeats groups of blue LED flashes:
 | 2 | RTC initialization or clock error |
 | 3 | SD initialization or filesystem mount |
 | 4 | Event queue overflow; at least one event was lost |
-| 5 | SD file open, write or close failed |
+| 5 | SD file open, write or sync failed |
 
 The logger disables further switch interrupts on an error and stops until
 reset. Error flashes block; USB diagnostics run between groups in the debug

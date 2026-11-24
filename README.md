@@ -9,6 +9,27 @@ This repo contains:
 * Devlog of the project
 * TODO: Posterity Images, etc
 
+## Generate sample logs
+
+With Python 3 installed on macOS, run this from the repository root:
+
+```sh
+./generate_logs.py 5 1000000 /Volumes/RAINUS/
+```
+
+This creates five files, each with a header and one million event records, in
+the existing destination directory. File names are randomly selected, distinct
+dates in `YYYYMMDD.csv` format, from 2020-01-02 through 2106-02-06. Dates can
+be in the future; the range keeps timestamps within the firmware's 32-bit
+Unix clock. Existing files are skipped and never overwritten. There
+must be enough unused dates for the requested number of files.
+
+All files use the example chip ID and a shared build timestamp before the first
+selected date. Events are generated in time order and distributed across the
+UTC day in the file name; multiple events can share a second. The data is
+synthetic and does not represent measured rainfall. Zero entries produces
+header-only files.
+
 Example output data from the field-test Rainus device (headers and notes added for exaplnation):  
 [Google Sheets](https://docs.google.com/spreadsheets/d/1Qej0Jb0RguejD68-Whe8UmjqHHGkIUU_zKdhaDspYHQ)
 
