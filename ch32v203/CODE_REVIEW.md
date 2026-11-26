@@ -9,6 +9,12 @@ received a readability pass with descriptive helpers, named protocol values
 and comments explaining hardware polling and its return values. Command
 sequencing, explicit delays, retry budgets and error policy are preserved.
 
+Updated 2026-11-25: an A2 collection request now appends a timestamped marker
+after pending sensor rows, with a single sync. Empty requests also leave a
+marker. Rainus-owned sources/configuration explain their data flow and hardware
+terms for general programmers; SD helpers/constants use descriptive names.
+The USB endpoint-direction comments are corrected without changing descriptors.
+
 The main readability problem was that startup, interrupt/foreground sharing,
 sleep entry and batching were all mixed into `main()`. The refactor puts the
 hardware wait in `sleep_until_switch_event()` and queue/fault handling in
@@ -81,7 +87,11 @@ terminal-error flashes use blocking delays with input capture still enabled
 for successful service requests. USB status work runs synchronously in foreground
 code; the optional debug build stays awake so the console can remain usable.
 Terminal errors disable both input interrupts. USB interrupts remain
-available for diagnostics. Error blink numbers and CSV contents are preserved.
+available for diagnostics. Error blink numbers and automatic sensor rows are
+preserved. Manual requests now add `,<press_unix_utc>,` after pending tips;
+the press time comes from the interrupt queue. Buffer clearing and success
+flashes happen only after the rows and marker sync. The USB saved-tip count
+excludes markers. To measure drift, record trusted UTC at the press as well.
 
 ## Concrete limitations that remain
 
@@ -91,7 +101,8 @@ available for diagnostics. Error blink numbers and CSV contents are preserved.
    batch followed by 500 ms for later batches on a 6.3-million-record file.
    That traversal now moves to startup; it is not eliminated. PA2 manual save
    has been reported working; startup timing, concurrent-input tests and idle
-   current after these changes still need measurement. CSV is unchanged.
+   current after these changes still need measurement. Automatic CSV rows are
+   unchanged; manual collection markers are new.
 2. **The interrupt is not guaranteed to be brief.** RTC synchronization uses
    1 ms polling delays and can wait up to 100 ms on a failure. Edges can
    coalesce in hardware while the handler is occupied. Reducing repeated
@@ -115,11 +126,18 @@ available for diagnostics. Error blink numbers and CSV contents are preserved.
 
 `make test` passed for independent debounce states, FIFO flush-marker ordering,
 queue wraparound/overflow, ID byte order, startup open, empty/partial batches,
-retained cursor and sync failures on FAT16/FAT32. Host checks also passed with
+retained cursor and sync failures on FAT16/FAT32. The November 25 checks also
+cover marker-only first saves, partial batches followed by markers, repeated
+collection, logging after collection, exact row ordering, one sync per manual
+request and failed writes/syncs. Host checks also passed with
 batch lengths 1, 10, 32, 64 and 128. Field and USB debug builds passed for all
 four benchmark sizes, plus LED-disabled builds; zero length is rejected.
-Generated field code retains the two wait instructions and checks both input
-lines before the second wait. Host tests cannot verify STOP current, wake races or peripheral clock
+The sleep function's operations match the previous version after flag renames;
+both input lines remain in the check before the second wait. The SD driver
+diff contains only comments and consistent identifier renames: numeric values
+and operations match. RTC operations also match after helper/constant naming
+changes, and USB descriptor/configuration bytes are unchanged. Host tests
+cannot verify STOP current, wake races or peripheral clock
 handshakes. Before deployment, repeat cold starts, compare a known closure
 count (including closures during a long write), verify the SD contents and
 measure idle current on the board. This refactor has not been flashed as part

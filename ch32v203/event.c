@@ -1,4 +1,9 @@
+// Contact-bounce filtering and a first-in, first-out (FIFO) input queue.
+// This file has no hardware dependencies, so it can also run in host tests.
+// See event.h for caller rules about interrupt masking and return values.
 #include "event.h"
+
+enum { DEBOUNCE_MINIMUM_TICKS = 3277 }; // 100 ms, rounded up at 32768 ticks/s.
 
 debounce_result_t debounce_edge(debounce_t *state, uint64_t tick)
 {
@@ -9,7 +14,8 @@ debounce_result_t debounce_edge(debounce_t *state, uint64_t tick)
     if (state->seen && tick < state->last_tick) return DEBOUNCE_CLOCK_BACKWARDS;
 
     // The RTC has 32768 ticks per second; 100 ms rounds up to 3277 ticks.
-    if (state->seen && tick - state->last_tick < 3277) return DEBOUNCE_IGNORED;
+    if (state->seen && tick - state->last_tick < DEBOUNCE_MINIMUM_TICKS)
+        return DEBOUNCE_IGNORED;
     state->seen = 1;
     state->last_tick = tick;
     return DEBOUNCE_ACCEPTED;
@@ -17,11 +23,14 @@ debounce_result_t debounce_edge(debounce_t *state, uint64_t tick)
 
 int event_queue_push(event_queue_t *queue, input_event_t event)
 {
+    // Ring buffer: advancing past the last array slot wraps back to slot 0.
+    // Reserve one slot so equal read/write indexes unambiguously mean empty.
     unsigned next = (queue->write_index + 1) % EVENT_QUEUE_SIZE;
     if (next == queue->read_index) {
         queue->overflow = 1;
         return 0;
     }
+    // Store the complete event BEFORE publishing the new write index.
     queue->items[queue->write_index] = event;
     queue->write_index = next;
     return 1;

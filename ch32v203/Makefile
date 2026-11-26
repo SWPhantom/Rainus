@@ -1,10 +1,14 @@
+# Build rainus.c plus the sources listed below. ch32fun supplies chip startup,
+# register definitions and the linker/build rules. FatFs supplies file access.
 TARGET := rainus
 TARGET_MCU := CH32V203C8T6
 TARGET_MCU_PACKAGE := CH32V203C8T6
 CH32FUN_ROOT ?= ../../ch32fun
 HOST_CC ?= cc
 BUILD_UNIX_TIME ?= $(shell date -u +%s)
+# 1 keeps the chip awake for USB serial; 0 sleeps between inputs.
 DEBUG_USB ?= 0
+# Number of sensor timestamps per automatic SD save.
 LOG_BUFFER_LENGTH ?= 10
 ADDITIONAL_C_FILES := sd_spi.c rtc.c event.c chip_id.c log.c fatfs/ff.c
 ifeq ($(DEBUG_USB),1)

@@ -33,14 +33,16 @@ static void check_queue(void)
     // Flush stays behind older tips and ahead of newer ones, including when
     // it arrived while foreground code was occupied with an SD write.
     for (unsigned round = 0; round < 100; ++round) {
-        assert(event_queue_push(&q, (input_event_t){EVENT_TIP, round * 2}));
-        assert(event_queue_push(&q, (input_event_t){EVENT_FLUSH, 0}));
-        assert(event_queue_push(&q, (input_event_t){EVENT_TIP, round * 2 + 1}));
+        uint32_t tip_time = 1794274153 + round * 3;
+        assert(event_queue_push(&q, (input_event_t){EVENT_TIP, tip_time}));
+        assert(event_queue_push(&q, (input_event_t){EVENT_FLUSH, tip_time + 1}));
+        assert(event_queue_push(&q, (input_event_t){EVENT_TIP, tip_time + 2}));
         assert(event_queue_pop(&q, &event));
-        assert(event.kind == EVENT_TIP && event.seconds == round * 2);
-        assert(event_queue_pop(&q, &event) && event.kind == EVENT_FLUSH);
+        assert(event.kind == EVENT_TIP && event.seconds == tip_time);
         assert(event_queue_pop(&q, &event));
-        assert(event.kind == EVENT_TIP && event.seconds == round * 2 + 1);
+        assert(event.kind == EVENT_FLUSH && event.seconds == tip_time + 1);
+        assert(event_queue_pop(&q, &event));
+        assert(event.kind == EVENT_TIP && event.seconds == tip_time + 2);
         assert(!event_queue_pop(&q, &event));
         assert(!q.overflow);
     }

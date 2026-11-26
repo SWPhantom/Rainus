@@ -1,5 +1,6 @@
 #!/bin/sh
-# Build with the host's current UTC time, then flash one board in ISP mode.
+# Build with the computer's current UTC time, then flash one board through
+# USB's ISP (In-System Programming) bootloader. BOOT/RST enters that mode.
 set -eu
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)

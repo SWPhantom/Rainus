@@ -163,8 +163,10 @@ flush requests, during an SD write. Between successful commits, a power loss
 can lose up to LOG_BUFFER_LENGTH minus one buffered events. During a write, it
 can lose the current batch or corrupt earlier FAT data as well. An unfinished
 batch remains in RAM during a dry period until a PA2 manual flush or further
-tips fill it. PA2 writes the partial batch, syncs and acknowledges with two
-brief flashes when LEDs are enabled; logging then continues. Low-battery
+tips fill it. PA2 writes the partial batch plus a timestamped collection
+marker, syncs once and acknowledges with two brief flashes when LEDs are
+enabled; logging then continues. Even an empty batch writes a marker.
+Low-battery
 handling is not implemented. A queue overflow stops the logger
 with an error (visible only when LED flashes are enabled), but may already have
 lost events. Test capture under real write delays and realistic bounce before

@@ -1,9 +1,11 @@
 #ifndef RAINUS_RTC_H
 #define RAINUS_RTC_H
 #include <stdint.h>
+// Clock API: Unix seconds in UTC, using the Real-Time Clock (RTC) crystal.
+// A result other than CLOCK_OK is a terminal fault in the application.
 typedef enum {
     CLOCK_OK = 0,
-    CLOCK_WRONG_SOURCE,      // RTC is configured for a source other than LSE.
+    CLOCK_WRONG_SOURCE,      // RTC source isn't the external 32768 Hz crystal.
     CLOCK_CRYSTAL_TIMEOUT,   // External 32768 Hz crystal did not become ready.
     CLOCK_SYNC_TIMEOUT,      // Bus-side RTC registers did not synchronize.
     CLOCK_WRITE_TIMEOUT,     // RTC did not finish its configuration write.

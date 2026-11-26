@@ -2,6 +2,7 @@
 #define RAINUS_CHIP_ID_H
 #include <stdint.h>
 
+// Factory ID size on the CH32V203: 96 bits = 12 bytes = 24 hex characters.
 #define CHIP_ID_BYTES 12
 #define CHIP_ID_TEXT_LEN (CHIP_ID_BYTES * 2)
 

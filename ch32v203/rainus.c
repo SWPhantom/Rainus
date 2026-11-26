@@ -1,3 +1,18 @@
+// Rainus application: sleep -> capture a switch closure -> batch -> save CSV.
+//
+// Startup runs once: configure the chip, read its factory ID, start the RTC
+// (Real-Time Clock), then enable inputs and prepare the SD file. Afterward:
+//   A0 interrupt: timestamp/debounce a rain tip and put it in the input queue.
+//   A2 interrupt: timestamp/debounce a collection request in that SAME queue.
+//   Main loop: take inputs in order; save full batches or a manual collection.
+//   No work: enter STOP sleep (RAM retained), except in the USB debug build.
+// The interrupt handlers do not write to SD. They can capture new inputs
+// while the main loop waits for an earlier SD operation to finish.
+//
+// Hardware notation used below: a register is a memory address whose reads/
+// writes control the chip. REG |= FLAG sets a bit; REG &= ~FLAG clears it.
+// The names such as EXTI->INTFR come from ch32fun/the chip manual. They are
+// kept to match those sources; comments explain their job at each use.
 #include "ch32fun.h"
 #include "fatfs/ff.h"
 #include "rtc.h"
@@ -26,10 +41,12 @@
 #endif
 #define INPUT_LINES (EXTI_Line0 | EXTI_Line2)
 
-// Bits in the interrupt controller's system-control register.
-#define PFIC_SLEEP_DEEP  (1u << 2)
-#define PFIC_WFI_AS_WFE  (1u << 3)
-#define PFIC_SET_EVENT   (1u << 5)
+// PFIC = Programmable Fast Interrupt Controller (called NVIC by ch32fun).
+// These bits in its system-control register choose how a wait instruction
+// behaves. Their positions are fixed by this chip, not application options.
+#define INTERRUPT_CONTROLLER_DEEP_SLEEP (1u << 2)
+#define WAIT_INSTRUCTION_USES_EVENTS    (1u << 3)
+#define SET_SOFTWARE_WAKE_EVENT         (1u << 5)
 
 // These numbers are also the repeating LED error codes and USB error values.
 typedef enum {
@@ -59,6 +76,8 @@ static unsigned saved_count;
 static unsigned fatal_error;
 static unsigned clock_error;
 static volatile unsigned interrupt_count;
+// Required callback name from ch32fun's USB library. The computer sends
+// single-character commands; defer the status reply to the main loop.
 void HandleUSBInput(int count, uint8_t *data)
 {
     for (int i = 0; i < count; ++i)
@@ -66,11 +85,14 @@ void HandleUSBInput(int count, uint8_t *data)
 }
 static void debug_status(void)
 {
+    // Enumeration means the computer has recognized/configured the USB device.
     if (!status_requested || !USBDCTX.USBD_DevEnumStatus) return;
     char line[150];
     int n = snprintf(line, sizeof line, "id=%s error=%u rtc=%u irq=%u pin=%d saved=%u buffered=%u time=%lu\r\n",
                      chip_id, fatal_error, clock_error, interrupt_count, funDigitalRead(PA0),
                      saved_count, batch_count, (unsigned long)clock_seconds());
+    // Endpoint 3 is the USB channel carrying board -> computer serial text.
+    // The library returns zero if it accepted the reply; otherwise try later.
     if (n > 0 && (unsigned)n < sizeof line &&
         USBD_SendEndpointNEW(3, (uint8_t *)line, n, 1) == 0) status_requested = 0;
 }
@@ -123,7 +145,8 @@ static void stop_with_error(logger_error_t error)
     }
 }
 
-// Shared capture path. Each pin has its own debounce history, so the service
+// Shared capture path, called only from the two input interrupt handlers.
+// Each pin has its own debounce history, so the service
 // button cannot debounce away a nearby rain tip (or vice versa). No SD I/O
 // happens here. Same-priority handlers serialize access to the RTC and queue.
 static void capture_edge(event_kind_t kind, debounce_t *debounce)
@@ -144,6 +167,10 @@ static void capture_edge(event_kind_t kind, debounce_t *debounce)
     event_queue_push(&event_queue, event); // A full queue latches the fault.
 }
 
+// EXTI = External Interrupt: chip hardware notices pin voltage changes.
+// These function names/interrupt attributes are required by the startup code.
+// INTFR holds pending input flags; writing a 1 CLEARS that pending flag (this
+// register has special hardware behavior, unlike an ordinary C variable).
 // These handlers also run during startup SD preparation and batch writes.
 __attribute__((interrupt)) void EXTI0_IRQHandler(void)
 {
@@ -164,18 +191,25 @@ __attribute__((interrupt)) void EXTI2_IRQHandler(void)
 
 static void enable_switch_interrupts(void)
 {
-    // Dry contacts from PA0/PA2 to GND pull the normally-high inputs LOW.
+    // A dry contact supplies no voltage: it only connects/disconnects wires.
+    // Internal pull-up resistors keep PA0/PA2 HIGH while open; connecting to
+    // ground makes them LOW. We capture that HIGH -> LOW (falling) transition.
     funPinMode(PA0, GPIO_CFGLR_IN_PUPD);
     funDigitalWrite(PA0, FUN_HIGH);
     funPinMode(PA2, GPIO_CFGLR_IN_PUPD);
     funDigitalWrite(PA2, FUN_HIGH);
+    // AFIO (Alternate Function I/O) maps pin inputs to interrupt lines.
+    // Clearing these fields selects port A for lines 0 and 2.
     AFIO->EXTICR[0] &= ~(AFIO_EXTICR1_EXTI0 | AFIO_EXTICR1_EXTI2);
-    EXTI->RTENR &= ~INPUT_LINES;
-    EXTI->FTENR |= INPUT_LINES;
+    EXTI->RTENR &= ~INPUT_LINES; // Disable rising-edge detection (release).
+    EXTI->FTENR |= INPUT_LINES;  // Enable falling-edge detection (closure).
     EXTI->INTFR = INPUT_LINES;
-    EXTI->INTENR |= INPUT_LINES;
-    // Also latch an event for WFE, even while interrupts are masked.
+    EXTI->INTENR |= INPUT_LINES; // Let a closure request an interrupt handler.
+    // Also remember a hardware event for WFE (Wait For Event) sleep. This
+    // wakes the chip even when interrupt handlers are temporarily disabled.
     EXTI->EVENR |= INPUT_LINES;
+    // Equal priority prevents the handlers interrupting each other while
+    // changing the shared queue or reading the clock. Zero is the priority.
     NVIC_SetPriority(EXTI0_IRQn, 0);
     NVIC_SetPriority(EXTI2_IRQn, 0);
     NVIC_EnableIRQ(EXTI0_IRQn);
@@ -194,18 +228,24 @@ static inline void compiler_barrier(void)
 // Called only with interrupts masked and an empty software queue.
 // WFE = Wait For Event. EXTI latches either input as a hardware event even with
 // interrupts masked, so an edge between the empty check and sleep can wake us.
+// WFI = Wait For Interrupt; WFE = Wait For Event. An event here is a hardware
+// wake request, not the input_event_t object we later put in our RAM queue.
 // This QingKe core uses the RISC-V `wfi` instruction for BOTH WFI and WFE;
-// PFIC_WFI_AS_WFE chooses event behavior. PFIC_SLEEP_DEEP selects deep sleep,
-// and PWR->CTLR selects STOP rather than standby. STOP retains our RAM.
+// WAIT_INSTRUCTION_USES_EVENTS chooses event behavior. The deep-sleep bit
+// enables the deeper wait state; PWR->CTLR selects STOP rather than standby.
+// STOP retains our RAM.
 static void sleep_until_switch_event(void)
 {
+    // PWR is the Power Control peripheral. Clear PDDS (selects standby) and
+    // LPDS (low-power regulator option): use STOP with the normal regulator.
     PWR->CTLR &= ~(PWR_CTLR_PDDS | PWR_CTLR_LPDS);
 
     // Set and consume a software event first. An old, uncleared event would
     // otherwise make sleep return immediately and waste power. This sequence
     // is the one that reduced idle current in our hardware comparisons.
-    NVIC->SCTLR |= PFIC_SLEEP_DEEP | PFIC_WFI_AS_WFE | PFIC_SET_EVENT;
-    NVIC->SCTLR &= ~PFIC_SET_EVENT;
+    NVIC->SCTLR |= INTERRUPT_CONTROLLER_DEEP_SLEEP | WAIT_INSTRUCTION_USES_EVENTS |
+                   SET_SOFTWARE_WAKE_EVENT;
+    NVIC->SCTLR &= ~SET_SOFTWARE_WAKE_EVENT;
     __asm__ volatile ("wfi" ::: "memory");
 
     // If a switch edge arrived during that first wait, let the interrupt run
@@ -213,7 +253,7 @@ static void sleep_until_switch_event(void)
     // Keep this check instead of ch32fun's __WFE(), which always waits twice.
     if (!(EXTI->INTFR & INPUT_LINES))
         __asm__ volatile ("wfi" ::: "memory");
-    NVIC->SCTLR &= ~(PFIC_SLEEP_DEEP | PFIC_WFI_AS_WFE);
+    NVIC->SCTLR &= ~(INTERRUPT_CONTROLLER_DEEP_SLEEP | WAIT_INSTRUCTION_USES_EVENTS);
 }
 #endif
 
@@ -256,12 +296,13 @@ int main(void)
 {
     SystemInit();
     funGpioInitAll();
-    // The factory ID occupies 12 consecutive bytes, not a generated ID.
+    // ESIG is the chip's Electronic Signature hardware; UID is its factory
+    // Unique ID. Read 12 consecutive bytes without writing/assigning an ID.
     const volatile uint8_t *uid = (const volatile uint8_t *)&ESIG->UID0;
     uint8_t bytes[CHIP_ID_BYTES];
     for (unsigned i = 0; i < CHIP_ID_BYTES; ++i) bytes[i] = uid[i];
     chip_id_format(bytes, chip_id);
-    funDigitalWrite(PA15, FUN_HIGH);
+    funDigitalWrite(PA15, FUN_HIGH); // Blue LED is active LOW; start it off.
     funPinMode(PA15, GPIO_CFGLR_OUT_10Mhz_PP);
 #if RAINUS_DEBUG_USB
     USBDSetup();
@@ -290,11 +331,17 @@ int main(void)
         if (event.kind == EVENT_TIP) batch[batch_count++] = event.seconds;
         if (batch_count == LOG_BUFFER_LENGTH || event.kind == EVENT_FLUSH) {
             unsigned count = batch_count;
-            if (!log_write_batch(chip_id, batch, count, RAINUS_BUILD_UNIX_TIME))
-                stop_with_error(ERROR_SD_WRITE);
+            int saved;
+            if (event.kind == EVENT_FLUSH)
+                saved = log_write_manual_flush(chip_id, batch, count,
+                                              RAINUS_BUILD_UNIX_TIME, event.seconds);
+            else
+                saved = log_write_batch(chip_id, batch, count, RAINUS_BUILD_UNIX_TIME);
+            if (!saved) stop_with_error(ERROR_SD_WRITE);
+            // Clear only after BOTH the rows and any collection marker sync.
             batch_count = 0;
 #if RAINUS_DEBUG_USB
-            saved_count += count;
+            saved_count += count; // Sensor tips only; collection markers aren't rain.
 #endif
             // The marker follows all tips this acknowledgment covers. Tips
             // queued after it remain in the next batch; this isn't a shutdown.

@@ -18,7 +18,8 @@ blue LED is on PA15.
    closure pulls it low and triggers a falling-edge interrupt. Do not connect a
    powered sensor circuit to the pin.
 2. Optionally connect a voltage-free service button between PA2 (A2) and GND.
-   A brief closure requests a flush of the pending events; it is not a rain tip.
+   A brief closure saves pending events and adds a timestamped collection
+   marker, even if no events are pending. It is not a rain tip.
 3. Insert a spare FAT16- or FAT32-formatted microSD card. The driver supports
    SD v2+ SDSC/SDHC/SDXC cards in SPI mode; exFAT is not supported.
 4. Power the board. Startup now opens the log and finds its end, which can take
@@ -203,7 +204,7 @@ Startup runs once after reset. The deployment loop then repeats:
 ```text
 wait for a tip or manual-flush request (STOP while idle in the field build)
 for a tip: add its timestamp; write and clear when LOG_BUFFER_LENGTH is reached
-for a manual flush: write and clear the partial batch, acknowledge, then continue
+for a manual flush: write pending tips + collection marker, sync, clear, acknowledge
 ```
 
 `wait_for_event()` handles the queue and faults; `sleep_until_switch_event()`
@@ -228,12 +229,27 @@ discards any real closures that occur close together. If an RTC reading goes
 backwards relative to the last accepted edge, the firmware reports an RTC
 error and stops; it does not silently accept a questionable timestamp.
 
-The main firmware is split into a few files: `rainus.c` coordinates startup,
-the interrupts, sleep and batching; `event.c` filters switch bounce and holds
-the FIFO queue; `rtc.c`
-reads and initializes the clock; `chip_id.c` formats the factory ID; `log.c`
-writes CSV batches; and `sd_spi.c` talks to the card through SPI. The `fatfs`
-directory contains the filesystem library used by the logger.
+For reading the code, start with `main()` in `rainus.c`, then follow the calls:
+
+| Source | Responsibility |
+| --- | --- |
+| `rainus.c` | Startup, input interrupt handlers, sleep, batching and error policy |
+| `event.c` / `event.h` | Contact-bounce filter and first-in, first-out input queue |
+| `rtc.c` / `rtc.h` | Initialize/read the Real-Time Clock, including fractional seconds |
+| `chip_id.c` / `chip_id.h` | Format the chip's factory ID bytes as text |
+| `log.c` / `log.h` | CSV rows, collection markers and one sync per saved batch |
+| `sd_spi.c` | Move 512-byte sectors over Serial Peripheral Interface (SPI) wires |
+| `funconfig.h` | Select the field/debug processor clocks |
+| `usb_config.h` | Describe the optional serial device to the computer |
+| `fatfs/ffconf.h` | Rainus's settings for the filesystem library |
+
+The bundled `fatfs/ff.c`, `ff.h` and `diskio.h` are upstream library code.
+External ch32fun supplies chip startup and hardware register names; its USB
+library is linked only for `DEBUG_USB=1`. Those libraries require names such as
+`disk_read`, `HandleUSBInput` and `EXTI0_IRQHandler`. The Rainus-owned files
+explain the hardware terminology next to the code that uses it. Archived
+`experiments/` and the separate `power_floor/` program are not part of the
+normal logger build.
 
 Both input interrupts stay enabled during SD writes. The queue can
 hold 31 events (tips and flush markers) while the main loop is busy. If it overflows, at least one
@@ -259,10 +275,13 @@ indications are enabled. Automatic writes have no LED indication.
 
 ### Manually saving a partial batch
 
-Briefly connect **PA2/A2 to GND**, then release it. The flush marker is processed
-after earlier queued tips; their timestamps are written along with the pending
-batch and synced. The count clears only after a successful write. An empty
-batch causes no SD I/O and adds no row. Two 75 ms blue flashes acknowledge
+Briefly connect **PA2/A2 to GND**, then release it. The request is processed
+after earlier queued tips. Their timestamps and the pending batch are saved,
+followed by a collection-marker row of the form **`,<button Unix time>,`**.
+The ID and build-time columns are empty; the middle column contains the RTC
+time captured at the accepted button press, not the later SD-write time.
+An empty batch still writes a marker. The rows and marker share one `f_sync()`;
+the count clears only after it succeeds. Two 75 ms blue flashes acknowledge
 completion, unless `RAINUS_LED_ENABLED=0`. Error flashes repeat instead of a
 success acknowledgment on failure.
 
@@ -273,10 +292,17 @@ acknowledgment covers events ahead of that request, not every event that might
 arrive later. To collect the card, disconnect power after acknowledgment before
 removing it. With LEDs disabled there is no visual success indication.
 
+To use a marker to assess RTC drift, note the **trusted UTC time** when pressing
+A2. Later compare it with the marker's recorded RTC time. The marker alone
+does not supply a true reference or adjust the clock. Ignore rows with an empty
+`chip_id` when counting rainfall/drip events; USB's `saved=` count also excludes
+markers.
+
 For a bench check at the default length, start with a new log, wait for startup
-to finish, then generate one PA0 tip and press PA2: expect one CSV row and two
-success flashes. Repeat with nine tips. Press PA2 again with no new tips:
-expect another acknowledgment but no added rows. Also check a held PA2 contact,
+to finish, then generate one PA0 tip and press PA2: expect the header, one
+sensor row followed by one marker, and two success flashes. Repeat with nine
+tips: expect nine sensor rows followed by a marker. Press PA2 again with no new
+tips: expect another marker and acknowledgment. Also check a held PA2 contact,
 a request during an automatic write, and subsequent normal logging. Verify the
 card contents after powering off, and measure the idle current after release.
 
@@ -297,11 +323,13 @@ startup separately from at least three data batches, using:
 Record duration and charge with the PPK2, then power off and confirm the records
 on the card. The expected behavior is a potentially long startup, followed by
 normal-duration data batches, including the first. Check idle current after
-writes as well. The CSV and SPI speed are unchanged.
+writes as well. Automatic sensor rows and SPI speed are unchanged; manual
+collection requests additionally write a marker.
 
 `make test` checks the CSV/header and sync behavior on FAT16/FAT32, including
 sector/cluster crossings, explicit startup open and close/reopen, empty/partial
-batches and a sync error. Independent debounce and event-queue tests cover
+batches, timestamped manual markers (including empty batches), one sync per
+manual request, and write/sync failures. Independent debounce and event-queue tests cover
 flush-marker ordering, wraparound and overflow. The mock disk counts reads for
 small and 3 MiB files to check that traversal happens during open, not data
 batches. These counts are not hardware timings.
@@ -354,12 +382,14 @@ checks that the high half didn't change during the read, because the low half
 wraps every 65,536 seconds (about 18.2 hours). This prevents a rare incorrect
 read during a two-year deployment. The Unix counter itself wraps in 2106.
 
-New or empty log files get a header. Each record contains the factory chip ID,
-the event time and the firmware build time, both in Unix seconds (UTC):
+New or empty log files get a header. Sensor records contain the factory chip
+ID, event time and firmware build time, both in Unix seconds (UTC). Manual
+collection adds a row with only its middle (RTC event-time) column populated:
 
 ```text
 chip_id,event_unix_utc,build_unix_utc
 CDAB207B0FBCFCE239E339E3,1794274153,1794274141
+,1794274160,
 ```
 
 The 24 hexadecimal characters are the chip's fixed 12-byte ID, read directly
@@ -381,7 +411,7 @@ Older versions used other columns. Existing nonempty `RAINLOG.TXT` files are
 left intact and do not get a new header; appending to one will mix formats.
 Archive or rename the old file while the board is powered off to start a new,
 self-describing log. Startup opens/creates the file without writing its CSV
-header; the header appears with the first nonempty automatic or manual batch.
+header; the header appears with the first sensor batch or collection marker.
 
 The board schematic shows no separate backup battery on VBAT. Do not assume
 that the RTC will retain time when power is removed. The MCU's VBAT range is
@@ -390,17 +420,29 @@ See the [power and enclosure notes](POWER_AND_ENCLOSURE.md).
 
 ## How the SD driver communicates
 
-`sd_spi.c` controls one fixed SPI1 socket. Selecting the card means pulling
-its PA3 chip-select pin LOW; deselecting drives it HIGH and supplies trailing
-clocks. `spi_exchange_byte()` sends one byte and receives one simultaneously,
-polling the hardware TXE/RXNE flags. It does not disable sensor interrupts.
+The layers are `log.c` (CSV) → FatFs (files/directories) → `sd_spi.c` (sectors
+and wire protocol) → card. SPI is Serial Peripheral Interface: one clock wire,
+one data wire in each direction, and a chip-select wire. Each byte exchange
+generates eight clock pulses, sending and receiving a bit per pulse.
+
+`sd_begin_transaction()` selects our one socket by driving PA3 chip select
+LOW (near zero volts), then waits for the card to finish any internal work.
+`sd_end_transaction()` drives it HIGH (near 3.3 V) and sends eight final clock
+pulses so the card releases its output wire. Neither function removes power.
+`spi_send_and_receive_byte()` waits for hardware buffer flags, sends a byte,
+and returns the received byte. Even reads must send something to generate
+clock pulses; an all-ones byte (`0xFF`) supplies them. Input interrupts remain
+enabled during this work.
 
 `sd_send_command()` sends an SD command packet and returns the first response
-byte (R1), or a named no-response sentinel. Commands, data tokens, CRC bytes,
-address flags, pins and waiting limits have named constants. The driver moves
-512-byte sectors; `log.c` and FatFs handle CSV and files above it. Busy-card
-checks send fill bytes to supply clocks until the card reports ready. Their
-retry budgets include 1 ms delays and are not exact elapsed-time deadlines.
+byte (called R1 by the SD specification), or `SD_NO_RESPONSE`. Its named
+constants describe what the commands do: for example,
+`SD_COMMAND_READ_POWER_AND_ADDRESSING` sends CMD58, which reads the card's
+Operating Conditions Register (OCR). CRC means Cyclic Redundancy Check, a
+transmission checksum. Source comments explain the packet fields, response
+sizes, start bytes, address units and checksum bytes before they are used.
+Busy checks include 1 ms delays and bounded retries; transfer and interrupt
+time makes these approximate limits rather than exact elapsed-time deadlines.
 
 The driver keeps the tested startup delay, CMD0 readiness exception and reset
 retries that resolved the SanDisk cold-start failure. Card-operation failures

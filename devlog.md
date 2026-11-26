@@ -860,3 +860,57 @@ chip-select transitions and explicit delays against the prior driver. The
 compiled binaries are not byte-identical; these are size comparisons, not new
 hardware timing or energy measurements. Host filesystem tests do not exercise
 the actual SPI peripheral. No flash or new power-profile run was performed.
+
+2026-11-25 — Collection timestamps and explanations for general programmers
+
+A2 now saves pending sensor rows followed by a three-column collection marker:
+`,<button_unix_utc>,`. Its ID and build-time fields are empty; the middle
+field uses the RTC time captured at the accepted A2 press, even if an earlier
+SD operation delays processing. An empty buffer still gets a marker. Earlier
+queued tips precede it and later queued tips remain for subsequent batches.
+The new `log_write_manual_flush()` shares the automatic writer's internals,
+adds the marker, and syncs once for the combined operation. It creates the
+usual header if a collection marker is the first record. The buffer clears
+and the existing two-flash acknowledgment occurs only after success. A failed
+write/sync stops with error 5; the pending count is not cleared or acknowledged.
+USB's saved count still counts sensor tips only. Automatic sensor rows and the
+default batch length of ten are unchanged.
+
+This is an RTC reading, not a trusted reference timestamp. To assess drift,
+write down trusted UTC when pressing A2 and compare it with the marker later.
+Exclude empty-ID rows when counting sensor events. No clock adjustment or
+reset-detection policy was added.
+
+Expanded the Rainus-owned compiled sources and configuration comments for a
+reader who knows programming but not embedded terminology. Each module now
+explains its purpose/data flow. SD documentation starts with the four wires,
+voltage levels, simultaneous byte exchange and why reading requires sending
+bytes. It defines command numbers, R1 status, CRC checksums, the card's power/
+address information word and erase groups. Helpers/constants now describe
+their purpose rather than abbreviating the SD specification's terms. Clock,
+input queue, interrupt, sleep, ID and configuration comments explain hardware
+registers, return values and caller responsibilities. Removed an obsolete
+commented-out USB descriptor entry; corrected reversed endpoint-direction
+comments without changing the descriptor bytes. Hardware/library-required
+identifiers and upstream filesystem sources remain intact.
+
+Validation: host debounce/queue, chip-ID and FAT16/FAT32 tests passed at batch
+lengths 1/10/32/64/128. Added marker-only/partial/repeated collection tests,
+full automatic batches followed by collection, later sensor logging, exact CSV
+ordering/header contents, one sync per manual request, preserved queued A2
+timestamps, and injected write/sync failures. Retained-cursor large-file tests
+still use at most three sector reads per tested batch, versus startup reads
+of 25 (FAT16) / 50 (FAT32) for a 3 MiB file. These are mock-disk counts, not
+new timing or energy measurements.
+
+Field and USB-debug builds passed at 10/32/64/128, plus both LED-disabled
+variants; zero batch length is rejected. At length ten, field flash is 8,900
+bytes with 1,004 bytes static RAM; USB-debug flash is 11,244 bytes with 1,328
+bytes static RAM. Source-token comparisons confirm SD changes are only
+comments and 39 consistent identifier renames, with every operation/numeric
+value retained. RTC operations match after helper/constant substitutions;
+the sleep sequence also matches after flag renames, including both input
+lines in the pending-event check. USB and clock/filesystem configurations
+have unchanged code tokens. Deployment-script syntax and diff whitespace
+checks passed. No board flash or new power measurement was performed. The
+marker format, press time and acknowledgment still need a hardware check.

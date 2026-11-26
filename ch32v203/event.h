@@ -2,7 +2,12 @@
 #define RAINUS_EVENT_H
 #include <stdint.h>
 
-// One debounce state for the switch. Initialize to {0} before the first edge.
+// Input handling has two jobs: filter rapid contact bounce, and keep accepted
+// inputs in arrival order until the main loop can process them. No SD access
+// happens here. Each physical switch has its own debounce state.
+//
+// A typedef gives a type a name; debounce_t is a struct, not a function.
+// Initialize it to {0} before the first edge (a change from HIGH to LOW).
 // last_tick is the time of the last accepted edge, not the last bounce.
 typedef struct {
     uint64_t last_tick;
@@ -19,10 +24,13 @@ typedef enum {
 // edge updates state; the caller decides how to handle each result.
 debounce_result_t debounce_edge(debounce_t *state, uint64_t tick);
 
-typedef enum { EVENT_TIP, EVENT_FLUSH } event_kind_t;
+typedef enum {
+    EVENT_TIP,   // A0: add a rain/drip timestamp to the current batch.
+    EVENT_FLUSH  // A2: save the batch and a timestamped collection marker.
+} event_kind_t;
 typedef struct {
     event_kind_t kind;
-    uint32_t seconds; // Used only by EVENT_TIP; flush requests aren't log rows.
+    uint32_t seconds; // Unix time at either input's accepted closure.
 } input_event_t;
 
 #define EVENT_QUEUE_SIZE 32 // One slot stays empty, so capacity is 31 events.

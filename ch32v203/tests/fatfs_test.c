@@ -16,6 +16,7 @@
 static BYTE image[SECTORS * 512];
 static unsigned read_sectors, write_sectors, sync_calls;
 static int fail_sync;
+static unsigned writes_to_fail;
 
 static void word(unsigned offset, unsigned value) {
     image[offset] = value; image[offset + 1] = value >> 8;
@@ -32,6 +33,7 @@ DRESULT disk_read(BYTE p, BYTE *b, LBA_t s, UINT n) {
 }
 DRESULT disk_write(BYTE p, const BYTE *b, LBA_t s, UINT n) {
     if (p || !n || s >= SECTORS || n > SECTORS - s) return RES_PARERR;
+    if (writes_to_fail) { --writes_to_fail; return RES_ERROR; }
     write_sectors += n;
     memcpy(image + s * 512, b, n * 512); return RES_OK;
 }
@@ -152,7 +154,7 @@ static void check_log_format(void) {
     assert(f_mount(0, "", 0) == FR_OK);
 }
 
-static void check_startup_open_and_empty_flush(void) {
+static void check_startup_open_and_empty_automatic_batch(void) {
     FATFS fs;
     FILINFO info;
     assert(f_mount(&fs, "", 1) == FR_OK);
@@ -172,6 +174,121 @@ static void check_startup_open_and_empty_flush(void) {
     assert(f_mount(&fs, "", 1) == FR_OK);
     // Opening at startup creates an empty file, not an early CSV header.
     assert(f_stat("RAINLOG.TXT", &info) == FR_OK && info.fsize == 0);
+    assert(f_unlink("RAINLOG.TXT") == FR_OK);
+    assert(f_mount(0, "", 0) == FR_OK);
+}
+
+static void check_manual_collection_markers(void) {
+    FATFS fs;
+    FIL reader;
+    FILINFO info;
+    UINT n;
+    const char *id = "CDAB207B0FBCFCE239E339E3";
+    uint32_t events[LOG_BUFFER_LENGTH];
+    char expected[(3 * LOG_BUFFER_LENGTH + 10) * 64] =
+        "chip_id,event_unix_utc,build_unix_utc\r\n";
+    char actual[sizeof expected];
+    unsigned length = strlen(expected);
+    assert(f_mount(&fs, "", 1) == FR_OK);
+    assert(log_open()); // A new, empty file prepared during startup.
+
+    // Marker-only first save must create the header and sync once. It must
+    // preserve the supplied press time, even without any sensor timestamps.
+    unsigned syncs = sync_calls;
+    assert(log_write_manual_flush(NULL, NULL, 0, 1794274141, 1794274160));
+    assert(sync_calls == syncs + 1);
+    const char *first_marker = ",1794274160,\r\n";
+    strcpy(expected + length, first_marker);
+    length += strlen(first_marker);
+    assert(f_stat("RAINLOG.TXT", &info) == FR_OK && info.fsize == length);
+
+    // Partial batches: all their sensor rows precede their marker. For a
+    // configured length of 1, the second case intentionally has zero tips.
+    const unsigned counts[] = {1, LOG_BUFFER_LENGTH - 1};
+    for (unsigned pass = 0; pass < sizeof counts / sizeof counts[0]; ++pass) {
+        unsigned count = counts[pass];
+        for (unsigned i = 0; i < count; ++i) events[i] = 1794274200 + i;
+        syncs = sync_calls;
+        assert(log_write_manual_flush(id, events, count, 1794274141, 1794274400));
+        assert(sync_calls == syncs + 1); // Not a separate sync for the marker.
+        for (unsigned i = 0; i < count; ++i)
+            length += snprintf(expected + length, sizeof expected - length,
+                               "%s,%lu,1794274141\r\n", id, (unsigned long)events[i]);
+        const char *marker = ",1794274400,\r\n";
+        strcpy(expected + length, marker);
+        length += strlen(marker);
+        assert(f_stat("RAINLOG.TXT", &info) == FR_OK && info.fsize == length);
+    }
+
+    // A full automatic batch, followed by repeated collection presses with
+    // no pending tips. Both presses must leave distinct rows, not disappear.
+    for (unsigned i = 0; i < LOG_BUFFER_LENGTH; ++i) events[i] = 1794274500 + i;
+    syncs = sync_calls;
+    assert(log_write_batch(id, events, LOG_BUFFER_LENGTH, 1794274141));
+    assert(sync_calls == syncs + 1);
+    for (unsigned i = 0; i < LOG_BUFFER_LENGTH; ++i)
+        length += snprintf(expected + length, sizeof expected - length,
+                           "%s,%lu,1794274141\r\n", id, (unsigned long)events[i]);
+    assert(log_write_manual_flush(NULL, NULL, 0, 1794274141, 1794274700));
+    assert(log_write_manual_flush(NULL, NULL, 0, 1794274141, 1794274701));
+    assert(sync_calls == syncs + 3);
+    const char *last_markers = ",1794274700,\r\n,1794274701,\r\n";
+    strcpy(expected + length, last_markers);
+    length += strlen(last_markers);
+
+    // Normal logging resumes after collection; no second header and no
+    // overwriting earlier rows, including across sector/cluster boundaries.
+    const uint32_t next_tip = 1794274800;
+    assert(log_write_batch(id, &next_tip, 1, 1794274141));
+    assert(sync_calls == syncs + 4);
+    length += snprintf(expected + length, sizeof expected - length,
+                       "%s,1794274800,1794274141\r\n", id);
+    assert(f_stat("RAINLOG.TXT", &info) == FR_OK && info.fsize == length);
+    assert(log_close());
+    assert(f_open(&reader, "RAINLOG.TXT", FA_READ) == FR_OK);
+    assert(f_read(&reader, actual, sizeof actual, &n) == FR_OK && n == length);
+    assert(memcmp(actual, expected, length) == 0 && f_eof(&reader));
+    assert(f_close(&reader) == FR_OK);
+    assert(f_unlink("RAINLOG.TXT") == FR_OK);
+    assert(f_mount(0, "", 0) == FR_OK);
+}
+
+static void check_manual_flush_failures(void) {
+    FATFS fs;
+    const char *id = "CDAB207B0FBCFCE239E339E3";
+    const uint32_t event = 1794274153;
+    assert(f_mount(&fs, "", 1) == FR_OK);
+    // Test both marker-only and partial saves. A failed final sync must not
+    // be reported as success even if the row writes themselves succeeded.
+    for (unsigned count = 0; count <= 1; ++count) {
+        assert(log_open());
+        unsigned syncs = sync_calls;
+        fail_sync = 1;
+        assert(!log_write_manual_flush(id, &event, count, 1794274141, 1794274160));
+        assert(sync_calls == syncs + 1);
+        fail_sync = 0;
+        assert(log_close()); // Cleanup only; firmware would stop with error 5.
+        assert(f_unlink("RAINLOG.TXT") == FR_OK);
+    }
+    assert(f_mount(0, "", 0) == FR_OK);
+}
+
+static void check_manual_write_failure(void) {
+    FATFS fs;
+    const char *id = "CDAB207B0FBCFCE239E339E3";
+    const uint32_t event = 1794274153;
+    assert(f_mount(&fs, "", 1) == FR_OK);
+    assert(log_open());
+    writes_to_fail = 1;
+    // More than a sector's worth of rows forces an actual write before the
+    // marker. Its failure must not turn into a successful collection result.
+    uint32_t events[20];
+    for (unsigned i = 0; i < 20; ++i) events[i] = event + i;
+    assert(!log_write_manual_flush(id, events, 20, 1794274141, 1794274200));
+    assert(writes_to_fail == 0); // The underlying sector-write failure occurred.
+    // The injected failure is over; cleanup does not mean retrying the batch.
+    // Firmware stops with error 5 and never acknowledges the failed request.
+    assert(log_close());
     assert(f_unlink("RAINLOG.TXT") == FR_OK);
     assert(f_mount(0, "", 0) == FR_OK);
 }
@@ -303,12 +420,14 @@ static void check_sync_failure(void) {
 
 int main(void) {
     make_fat16(); check_volume(); check_log_format();
-    check_startup_open_and_empty_flush(); check_partial_batches();
+    check_startup_open_and_empty_automatic_batch(); check_partial_batches();
+    check_manual_collection_markers(); check_manual_flush_failures(); check_manual_write_failure();
     check_retained_cursor(512); check_retained_cursor(3 * 1024 * 1024);
     check_sync_failure();
     make_fat32(); check_volume(); check_log_format();
-    check_startup_open_and_empty_flush(); check_partial_batches();
+    check_startup_open_and_empty_automatic_batch(); check_partial_batches();
+    check_manual_collection_markers(); check_manual_flush_failures(); check_manual_write_failure();
     check_retained_cursor(512); check_retained_cursor(3 * 1024 * 1024);
     check_sync_failure();
-    puts("FAT16/FAT32 startup, partial/empty batch, cursor and sync failure tests passed");
+    puts("FAT16/FAT32 batch, collection marker, cursor and failure tests passed");
 }

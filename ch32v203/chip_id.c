@@ -1,3 +1,5 @@
+// Format factory ID bytes as text for CSV/USB. This creates no new ID and
+// changes no hardware. rainus.c supplies the bytes read from the chip once.
 #include "chip_id.h"
 #include <stdio.h>
 
